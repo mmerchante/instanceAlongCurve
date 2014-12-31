@@ -109,12 +109,25 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         lodPlug = nodeFn.findPlug("overrideLevelOfDetail", False)
         lodPlug.setInt(1)
 
+    def getCurveFn(self, curvePlug):
+
+        if curvePlug.isConnected():
+            connections = OpenMaya.MPlugArray()
+            curvePlug.connectedTo(connections, True, False)
+            
+            if connections.length() == 1:
+                return OpenMaya.MFnNurbsCurve(connections[0].node())
+
+        return OpenMaya.MFnNurbsCurve()
+
     def draw(self, view, path, style, status):
 
         # Node fn to get plugs
         nodeFn = OpenMaya.MFnDependencyNode(self.thisMObject())
         knownInstancesPlug = nodeFn.findPlug(iacNode.knownInstancesAttr, True)
         instanceCountPlug = nodeFn.findPlug(iacNode.instanceCountAttr, True)
+
+        triggerUpdate = False
 
         # Only instance if we are missing elements
         if knownInstancesPlug.numConnectedElements() < instanceCountPlug.asInt():
@@ -129,6 +142,8 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
             if inputTransformConnectedPlugs.length() == 1:
                 transform = inputTransformConnectedPlugs[0].node()
                 transformFn = OpenMaya.MFnTransform(transform)
+
+                triggerUpdate = True
 
                 # Get shading group first
                 dagPath = OpenMaya.MDagPath()
@@ -151,7 +166,6 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                     shadingGroupFn.addMember(trInstance)
 
                     instanceFn = OpenMaya.MFnTransform(trInstance)
-                    instanceFn.translateBy(OpenMaya.MVector(random.random() * 5 + 10, random.random() * 5 + 10, random.random() * 5 + 10), OpenMaya.MSpace.kTransform)
                     self.setDrawingOverride(instanceFn)
 
                     instObjGroupsAttr = instanceFn.attribute('message')
@@ -163,18 +177,38 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 mdgModifier.doIt()
 
         # TODO: If there are more instances than needed, delete them
-        #elif knownInstancesPlug.numConnectedElements() > instanceCountPlug.asInt():
+        elif knownInstancesPlug.numConnectedElements() > instanceCountPlug.asInt():
+            triggerUpdate = True
             #pdb.set_trace()
 
+        inputCurvePlug = nodeFn.findPlug(iacNode.inputCurveAttr, True)
 
-        #connectedIndices = OpenMaya.MIntArray()
-        #knownInstancesPlug.getExistingArrayAttributeIndices(connectedIndices)
-        
-        #for i in range(0, connectedIndices.length()):
-            #knownPlugElement = knownInstancesPlug.elementByLogicalIndex(connectedIndices[i])
-            #print(knownPlugElement.asMObject())
-            #instanceFn = OpenMaya.MFnTransform(knownPlugElement.asMObject())
-            #instanceFn.translateBy(OpenMaya.MVector(random.random(), random.random(), random.random()), OpenMaya.MSpace.kTransform)
+        if inputCurvePlug.isConnected():
+
+            fnCurve = self.getCurveFn(inputCurvePlug)
+            curveLength = fnCurve.length()
+
+            connectedIndices = OpenMaya.MIntArray()
+            knownInstancesPlug.getExistingArrayAttributeIndices(connectedIndices)
+
+            connections = OpenMaya.MPlugArray()
+            
+            point = OpenMaya.MPoint()
+            curvePointIndex = 0
+
+            for i in connectedIndices:
+
+                param = fnCurve.findParamFromLength(curveLength * (float(curvePointIndex) / connectedIndices.length()))
+                fnCurve.getPointAtParam(param, point)
+
+                curvePointIndex += 1
+
+                knownPlugElement = knownInstancesPlug.elementByLogicalIndex(i)
+                knownPlugElement.connectedTo(connections, True, False)
+                
+                for c in xrange(0, connections.length()):
+                    instanceFn = OpenMaya.MFnTransform(connections[c].node())
+                    instanceFn.setTranslation(OpenMaya.MVector(point), OpenMaya.MSpace.kTransform)
 
         return OpenMaya.kUnknownParameter
 
@@ -185,7 +219,6 @@ def nodeInitializer():
 
     nAttr = OpenMaya.MFnNumericAttribute()
     geometryAttributeFn = OpenMaya.MFnGenericAttribute ()
-    curveAttributeFn = OpenMaya.MFnTypedAttribute()
     msgAttributeFn = OpenMaya.MFnMessageAttribute()
 
     iacNode.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
@@ -210,10 +243,10 @@ def nodeInitializer():
     iacNode.addAttribute( iacNode.instanceCountAttr)
     
     ## Input curve
-    iacNode.inputCurveAttr = curveAttributeFn.create( 'inputCurve', 'iC', OpenMaya.MFnData.kNurbsCurve)
-    curveAttributeFn.setWritable( True )
-    curveAttributeFn.setStorable( True ) 
-    curveAttributeFn.setHidden( True )
+    iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'iC')
+    msgAttributeFn.setWritable( True )
+    msgAttributeFn.setStorable( True ) 
+    msgAttributeFn.setHidden( False )
     iacNode.addAttribute( iacNode.inputCurveAttr )
 
 def initializePlugin( mobject ):
