@@ -20,6 +20,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
     knownInstancesAttr = OpenMaya.MObject()
 
     def __init__(self):
+        self.triggerUpdate = False
         OpenMayaMPx.MPxLocatorNode.__init__(self)
 
     # Helper function to get an array of available logical indices from the sparse array
@@ -60,21 +61,6 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
             currentAvailableIndex += 1
 
         return outIndices
-
-    def getNextAvailableLogicalIndex(self, plug):
-        
-        indices = OpenMaya.MIntArray()  
-        max = -1
-        
-        if plug.isArray():  
-            plug.getExistingArrayAttributeIndices(indices)
-            
-            for i in range(0, indices.length()):
-                if(indices[i] > max):
-                    max = indices[i]
-
-        # 0 if there is no element :)
-        return max + 1
 
     # Find original SG to reassign it to instance
     def getSG(self, dagPath):
@@ -127,8 +113,6 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         knownInstancesPlug = nodeFn.findPlug(iacNode.knownInstancesAttr, True)
         instanceCountPlug = nodeFn.findPlug(iacNode.instanceCountAttr, True)
 
-        triggerUpdate = False
-
         # Only instance if we are missing elements
         if knownInstancesPlug.numConnectedElements() < instanceCountPlug.asInt():
 
@@ -143,7 +127,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 transform = inputTransformConnectedPlugs[0].node()
                 transformFn = OpenMaya.MFnTransform(transform)
 
-                triggerUpdate = True
+                self.triggerUpdate = True
 
                 # Get shading group first
                 dagPath = OpenMaya.MDagPath()
@@ -177,10 +161,23 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 mdgModifier.doIt()
 
         # TODO: If there are more instances than needed, delete them
-        elif knownInstancesPlug.numConnectedElements() > instanceCountPlug.asInt():
-            triggerUpdate = True
+        # elif knownInstancesPlug.numConnectedElements() > instanceCountPlug.asInt():
+        #     triggerUpdate = True
             #pdb.set_trace()
 
+
+        # Update is done in the draw method to prevent being flooded with modifications from the curve callback
+        if self.triggerUpdate:
+            self.updateInstancePositions()
+
+        self.triggerUpdate = False
+
+        return OpenMaya.kUnknownParameter
+
+    def updateInstancePositions(self):
+
+        nodeFn = OpenMaya.MFnDependencyNode(self.thisMObject())
+        knownInstancesPlug = nodeFn.findPlug(iacNode.knownInstancesAttr, True)
         inputCurvePlug = nodeFn.findPlug(iacNode.inputCurveAttr, True)
 
         if inputCurvePlug.isConnected():
@@ -210,7 +207,14 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                     instanceFn = OpenMaya.MFnTransform(connections[c].node())
                     instanceFn.setTranslation(OpenMaya.MVector(point), OpenMaya.MSpace.kTransform)
 
+    def connectionMade(self, plug, otherPlug, asSrc):
+        if plug.attribute() == iacNode.inputCurveAttr:
+            OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(otherPlug.node(), curveChangedCallback, self)
+        
         return OpenMaya.kUnknownParameter
+
+def curveChangedCallback(node, plug, self):
+    self.triggerUpdate = True
 
 def nodeCreator():
     return OpenMayaMPx.asMPxPtr( iacNode() )
@@ -218,8 +222,8 @@ def nodeCreator():
 def nodeInitializer():
 
     nAttr = OpenMaya.MFnNumericAttribute()
-    geometryAttributeFn = OpenMaya.MFnGenericAttribute ()
     msgAttributeFn = OpenMaya.MFnMessageAttribute()
+    curveAttributeFn = OpenMaya.MFnTypedAttribute()
 
     iacNode.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
     msgAttributeFn.setWritable( True )
@@ -242,8 +246,8 @@ def nodeInitializer():
     nAttr.setHidden( False )
     iacNode.addAttribute( iacNode.instanceCountAttr)
     
-    ## Input curve
-    iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'iC')
+    # Input curve
+    iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'curve')
     msgAttributeFn.setWritable( True )
     msgAttributeFn.setStorable( True ) 
     msgAttributeFn.setHidden( False )
