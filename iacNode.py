@@ -102,7 +102,16 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
             curvePlug.connectedTo(connections, True, False)
             
             if connections.length() == 1:
-                return OpenMaya.MFnNurbsCurve(connections[0].node())
+
+                # Force a DAG path to get the world transformations correctly
+                path = OpenMaya.MDagPath()
+
+                trFn = OpenMaya.MFnDagNode(connections[0].node())
+                trFn.getPath(path)
+
+                path.extendToShape()
+
+                return OpenMaya.MFnNurbsCurve(path)
 
         return OpenMaya.MFnNurbsCurve()
 
@@ -165,6 +174,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         #     triggerUpdate = True
             #pdb.set_trace()
 
+        # TODO: CHECK DELETION AND CALLBACK!
 
         # Update is done in the draw method to prevent being flooded with modifications from the curve callback
         if self.triggerUpdate:
@@ -191,12 +201,17 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
             connections = OpenMaya.MPlugArray()
             
             point = OpenMaya.MPoint()
+
+            # TODO: let the user decide forward axis?
+            startOrientation = OpenMaya.MVector(0.0, 0.0, 1.0)
             curvePointIndex = 0
 
             for i in connectedIndices:
 
                 param = fnCurve.findParamFromLength(curveLength * (float(curvePointIndex) / connectedIndices.length()))
-                fnCurve.getPointAtParam(param, point)
+                fnCurve.getPointAtParam(param, point, OpenMaya.MSpace.kWorld)
+                tangent = fnCurve.tangent(param, OpenMaya.MSpace.kWorld)
+                rot = startOrientation.rotateTo(tangent)
 
                 curvePointIndex += 1
 
@@ -206,10 +221,22 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 for c in xrange(0, connections.length()):
                     instanceFn = OpenMaya.MFnTransform(connections[c].node())
                     instanceFn.setTranslation(OpenMaya.MVector(point), OpenMaya.MSpace.kTransform)
+                    instanceFn.setRotation(rot)
+
 
     def connectionMade(self, plug, otherPlug, asSrc):
         if plug.attribute() == iacNode.inputCurveAttr:
+
+            dagPath = OpenMaya.MDagPath()
+
+            trDagNode = OpenMaya.MFnDagNode(otherPlug.node())
+            trDagNode.getPath(dagPath)
+
+            dagPath.extendToShape()
+
+            # Get callbacks for shape and transform modifications
             OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(otherPlug.node(), curveChangedCallback, self)
+            OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(dagPath.node(), curveChangedCallback, self)
         
         return OpenMaya.kUnknownParameter
 
@@ -246,7 +273,7 @@ def nodeInitializer():
     nAttr.setHidden( False )
     iacNode.addAttribute( iacNode.instanceCountAttr)
     
-    # Input curve
+    # Input curve transform
     iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'curve')
     msgAttributeFn.setWritable( True )
     msgAttributeFn.setStorable( True ) 
