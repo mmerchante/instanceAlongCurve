@@ -14,7 +14,11 @@ kPluginNodeId = OpenMaya.MTypeId( 0x55555 )
 glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
-defaultInstanceCount = 5
+# TODO: command
+
+# Ideas:
+#   - three orientation modes: no orientation, tangent, normal
+#   - orientation constraints: set a fixed axis?
 
 class iacNode(OpenMayaMPx.MPxLocatorNode):
 
@@ -25,6 +29,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
     instanceCountAttr = OpenMaya.MObject()
     instancingModeAttr = OpenMaya.MObject()
     instanceLengthAttr = OpenMaya.MObject()
+    maxInstancesByLengthAttr = OpenMaya.MObject()
 
     knownInstancesAttr = OpenMaya.MObject()
     displayTypeAttr = OpenMaya.MObject()
@@ -36,10 +41,6 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
     def __init__(self):
         self.triggerUpdate = False
         OpenMayaMPx.MPxLocatorNode.__init__(self)
-
-    def __del__(self):
-        OpenMaya.MMessage.removeCallback(self.curveTransformCallback)
-        OpenMaya.MMessage.removeCallback(self.curveCallback)
 
     def postConstructor(self):
         OpenMaya.MFnDependencyNode(self.thisMObject()).setName("iacNodeShape#")
@@ -175,14 +176,28 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
  
         view.endGL()
 
-    def updateInstanceConnections(self, path):
-        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
+    # Calculate expected instances by the instancing mode
+    def getInstanceCountByMode(self):
+        instancingModePlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instancingModeAttr)
+        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), iacNode.inputCurveAttr)
+
+        if inputCurvePlug.isConnected() and instancingModePlug.asInt() == 1:
+            instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instanceLengthAttr)
+            maxInstancesByLengthPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.maxInstancesByLengthAttr)
+            curveFn = self.getCurveFn(inputCurvePlug)
+            return min(maxInstancesByLengthPlug.asInt(), int(curveFn.length() / instanceLengthPlug.asFloat()))
+
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instanceCountAttr)
+        return instanceCountPlug.asInt()
+
+    def updateInstanceConnections(self, path):
+        expectedInstanceCount = self.getInstanceCountByMode()
+        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
 
         self.forceCompute()
 
         # Only instance if we are missing elements
-        if knownInstancesPlug.numConnectedElements() < instanceCountPlug.asInt():
+        if knownInstancesPlug.numConnectedElements() < expectedInstanceCount:
 
             inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.inputTransformAttr)
 
@@ -206,7 +221,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
                 mdgModifier = OpenMaya.MDGModifier()
 
-                instanceCount = instanceCountPlug.asInt() - knownInstancesPlug.numConnectedElements()
+                instanceCount = expectedInstanceCount - knownInstancesPlug.numConnectedElements()
                 availableIndices = self.getAvailableLogicalIndices(knownInstancesPlug, instanceCount)
 
                 nodeFn = OpenMaya.MFnDagNode(path.transform())
@@ -235,14 +250,14 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 mdgModifier.doIt()
 
         # Remove instances if necessary
-        elif knownInstancesPlug.numConnectedElements() > instanceCountPlug.asInt():
+        elif knownInstancesPlug.numConnectedElements() > expectedInstanceCount:
             self.triggerUpdate = True
 
             mdgModifier = OpenMaya.MDGModifier()
             connections = OpenMaya.MPlugArray()
             
             numConnectedElements = knownInstancesPlug.numConnectedElements()
-            toRemove = knownInstancesPlug.numConnectedElements() - instanceCountPlug.asInt()
+            toRemove = knownInstancesPlug.numConnectedElements() - expectedInstanceCount
 
             for i in xrange(toRemove):
 
@@ -255,11 +270,6 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                     mdgModifier.deleteNode(node)
 
             mdgModifier.doIt()
-
-        # TODO: command
-
-        # Ideas:
-        #   - two modes: instanceCount or distanceBetweenInstances
 
         # Update is done in the draw method to prevent being flooded with modifications from the curve callback
         if self.triggerUpdate:
@@ -345,103 +355,115 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
     def forceCompute(self):
         OpenMaya.MPlug(self.thisMObject(), iacNode.sentinelAttr).asInt()
 
+    @staticmethod
+    def nodeCreator():
+        return OpenMayaMPx.asMPxPtr( iacNode() )
+
+    @staticmethod
+    def nodeInitializer():
+
+        nAttr = OpenMaya.MFnNumericAttribute()
+        msgAttributeFn = OpenMaya.MFnMessageAttribute()
+        curveAttributeFn = OpenMaya.MFnTypedAttribute()
+        enumFn = OpenMaya.MFnEnumAttribute()
+        modeEnumFn = OpenMaya.MFnEnumAttribute()
+
+        iacNode.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
+        msgAttributeFn.setWritable( True )
+        msgAttributeFn.setStorable( True )
+        msgAttributeFn.setHidden( False )
+        iacNode.addAttribute( iacNode.inputTransformAttr )
+
+        iacNode.knownInstancesAttr = msgAttributeFn.create("knownInstances", "ki")
+        msgAttributeFn.setWritable( True )
+        msgAttributeFn.setStorable( True )    
+        msgAttributeFn.setHidden( True )  
+        msgAttributeFn.setArray( True )  
+        msgAttributeFn.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete) # Very important :)
+        iacNode.addAttribute( iacNode.knownInstancesAttr )
+        
+        ## Input instance count    
+        iacNode.instanceCountAttr = nAttr.create("instanceCount", "iic", OpenMaya.MFnNumericData.kInt, 5)
+        nAttr.setMin(0)
+        nAttr.setSoftMax(100)
+        nAttr.setWritable( True )
+        nAttr.setStorable( True )
+        nAttr.setHidden( False )
+        iacNode.addAttribute( iacNode.instanceCountAttr)
+
+        ## Max instances when defined by instance length
+        iacNode.maxInstancesByLengthAttr = nAttr.create("maxInstancesByLength", "mibl", OpenMaya.MFnNumericData.kInt, 50)
+        nAttr.setMin(0)
+        nAttr.setSoftMax(200)
+        nAttr.setWritable( True )
+        nAttr.setStorable( True )
+        nAttr.setHidden( False )
+        iacNode.addAttribute( iacNode.maxInstancesByLengthAttr)
+
+        # Length between instances
+        iacNode.instanceLengthAttr = nAttr.create("instanceLength", "ilength", OpenMaya.MFnNumericData.kFloat, 1.0)
+        nAttr.setMin(0.01)
+        nAttr.setSoftMax(10)
+        nAttr.setWritable( True )
+        nAttr.setStorable( True )
+        nAttr.setHidden( False )
+        iacNode.addAttribute( iacNode.instanceLengthAttr)
+        
+        # Input curve transform
+        iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'curve')
+        msgAttributeFn.setWritable( True )
+        msgAttributeFn.setStorable( True ) 
+        msgAttributeFn.setHidden( False )
+        iacNode.addAttribute( iacNode.inputCurveAttr )
+
+        # Display override options
+        iacNode.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
+        enumFn.addField( "Normal", 0 );
+        enumFn.addField( "Template", 1 );
+        enumFn.addField( "Reference", 2 );
+        enumFn.setDefault("Reference")
+        enumFn.setWritable( True )
+        enumFn.setStorable( True )
+        enumFn.setHidden( False )
+        iacNode.addAttribute( iacNode.displayTypeAttr )
+
+        # Enum for selection of instancing mode
+        iacNode.instancingModeAttr = modeEnumFn.create('instancingMode', 'instancingMode')
+        modeEnumFn.addField( "Count", 0 );
+        modeEnumFn.addField( "Distance", 1 );
+        modeEnumFn.setWritable( True )
+        modeEnumFn.setStorable( True )
+        modeEnumFn.setHidden( False )
+        iacNode.addAttribute( iacNode.instancingModeAttr )
+
+        iacNode.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
+        nAttr.setWritable( True )
+        nAttr.setStorable( True )
+        nAttr.setHidden( False )
+        iacNode.addAttribute( iacNode.bboxAttr )
+
+        iacNode.sentinelAttr = nAttr.create('sentinel', 's', OpenMaya.MFnNumericData.kInt, 0)
+        nAttr.setWritable( False )
+        nAttr.setStorable( False )
+        nAttr.setReadable( True )
+        nAttr.setHidden( True )
+        iacNode.addAttribute( iacNode.sentinelAttr )
+
+        iacNode.attributeAffects( iacNode.displayTypeAttr, iacNode.sentinelAttr )
+        iacNode.attributeAffects( iacNode.bboxAttr, iacNode.sentinelAttr )
+
 def curveChangedCallback(node, plug, self):
     self.triggerUpdate = True
-
-def nodeCreator():
-    return OpenMayaMPx.asMPxPtr( iacNode() )
-
-def nodeInitializer():
-
-    nAttr = OpenMaya.MFnNumericAttribute()
-    msgAttributeFn = OpenMaya.MFnMessageAttribute()
-    curveAttributeFn = OpenMaya.MFnTypedAttribute()
-    enumFn = OpenMaya.MFnEnumAttribute()
-    modeEnumFn = OpenMaya.MFnEnumAttribute()
-
-    iacNode.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
-    msgAttributeFn.setWritable( True )
-    msgAttributeFn.setStorable( True )
-    msgAttributeFn.setHidden( False )
-    iacNode.addAttribute( iacNode.inputTransformAttr )
-
-    iacNode.knownInstancesAttr = msgAttributeFn.create("knownInstances", "ki")
-    msgAttributeFn.setWritable( True )
-    msgAttributeFn.setStorable( True )    
-    msgAttributeFn.setHidden( True )  
-    msgAttributeFn.setArray( True )  
-    msgAttributeFn.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete) # Very important :)
-    iacNode.addAttribute( iacNode.knownInstancesAttr )
-    
-    ## Input instance count    
-    iacNode.instanceCountAttr = nAttr.create("instanceCount", "iic", OpenMaya.MFnNumericData.kInt, defaultInstanceCount)
-    nAttr.setMin(0)
-    nAttr.setSoftMax(100)
-    nAttr.setWritable( True )
-    nAttr.setStorable( True )
-    nAttr.setHidden( False )
-    iacNode.addAttribute( iacNode.instanceCountAttr)
-
-    # Length between instances
-    iacNode.instanceLengthAttr = nAttr.create("instanceLength", "ilength", OpenMaya.MFnNumericData.kFloat, 1.0)
-    nAttr.setMin(0)
-    nAttr.setSoftMax(10)
-    nAttr.setWritable( True )
-    nAttr.setStorable( True )
-    nAttr.setHidden( False )
-    iacNode.addAttribute( iacNode.instanceLengthAttr)
-    
-    # Input curve transform
-    iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'curve')
-    msgAttributeFn.setWritable( True )
-    msgAttributeFn.setStorable( True ) 
-    msgAttributeFn.setHidden( False )
-    iacNode.addAttribute( iacNode.inputCurveAttr )
-
-    # Display override options
-    iacNode.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
-    enumFn.addField( "Normal", 0 );
-    enumFn.addField( "Template", 1 );
-    enumFn.addField( "Reference", 2 );
-    enumFn.setDefault("Reference")
-    enumFn.setWritable( True )
-    enumFn.setStorable( True )
-    enumFn.setHidden( False )
-    iacNode.addAttribute( iacNode.displayTypeAttr )
-
-    # Enum for selection of instancing mode
-    iacNode.instancingModeAttr = modeEnumFn.create('instancingMode', 'instancingMode')
-    modeEnumFn.addField( "Count", 0 );
-    modeEnumFn.addField( "Distance", 1 );
-    modeEnumFn.setWritable( True )
-    modeEnumFn.setStorable( True )
-    modeEnumFn.setHidden( False )
-    iacNode.addAttribute( iacNode.instancingModeAttr )
-
-    iacNode.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
-    nAttr.setWritable( True )
-    nAttr.setStorable( True )
-    nAttr.setHidden( False )
-    iacNode.addAttribute( iacNode.bboxAttr )
-
-    iacNode.sentinelAttr = nAttr.create('sentinel', 's', OpenMaya.MFnNumericData.kInt, 0)
-    nAttr.setWritable( False )
-    nAttr.setStorable( False )
-    nAttr.setReadable( True )
-    nAttr.setHidden( True )
-    iacNode.addAttribute( iacNode.sentinelAttr )
-
-    iacNode.attributeAffects( iacNode.displayTypeAttr, iacNode.sentinelAttr )
-    iacNode.attributeAffects( iacNode.bboxAttr, iacNode.sentinelAttr )
 
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
 
         pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
+
         # TODO: addmenuItem
-        mplugin.registerNode( kPluginNodeName, kPluginNodeId, nodeCreator,
-                              nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
+        mplugin.registerNode( kPluginNodeName, kPluginNodeId, iacNode.nodeCreator,
+                              iacNode.nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
     except:
         sys.stderr.write( 'Failed to register node: ' + kPluginNodeName )
         raise
@@ -453,7 +475,6 @@ def uninitializePlugin( mobject ):
     except:
         sys.stderr.write( 'Failed to deregister node: ' + kPluginNodeName )
         raise
-
 
 ###############
 # AE TEMPLATE #
@@ -478,14 +499,29 @@ class AEiacNodeTemplate(BaseTemplate):
         self.beginScrollLayout()
         self.beginLayout("Instance Along Curve Settings" ,collapse=0)
 
-        self.addControl("instancingMode", label="Instancing Mode")
-        self.addControl("instanceLength", label="Instancing Length")
-        self.addControl("instanceCount", label="Instance Count")
+        self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
+        self.addControl("instanceCount", label="Count")
+        self.addControl("instanceLength", label="Distance")
+        self.addControl("maxInstancesByLength", label="Max Instances")
+        
+        self.addSeparator()
+        
         self.addControl("instanceDisplayType", label="Instance Display Type")
         self.addControl("instanceBoundingBox", label="Use bounding box")
+        
+        self.addSeparator()
+        
         self.addControl("inputCurve", label="Input curve")
         self.addControl("inputTransform", label="Input object")
         self.addExtraControls()
 
         self.endLayout()
         self.endScrollLayout()
+
+    def onInstanceModeChanged(self, nodeName):
+        if pm.PyNode(nodeName).type() == kPluginNodeName:
+            nodeAttr = pm.PyNode(nodeName + ".instancingMode")
+            mode = nodeAttr.get("instancingMode")
+            self.dimControl(nodeName, "instanceLength", mode == 0)
+            self.dimControl(nodeName, "maxInstancesByLength", mode == 0)
+            self.dimControl(nodeName, "instanceCount", mode == 1)
