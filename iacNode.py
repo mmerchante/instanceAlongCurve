@@ -1,13 +1,18 @@
 import sys
 import pdb
+import pymel.core as pm
 import maya.OpenMayaMPx as OpenMayaMPx
 import maya.OpenMaya as OpenMaya
+import maya.OpenMayaRender as OpenMayaRender
 import inspect
 import random
 
 kPluginNodeName = 'iacNode'
 kPluginNodeClassify = 'utility/general'
 kPluginNodeId = OpenMaya.MTypeId( 0x55555 ) 
+
+glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
+glFT = glRenderer.glFunctionTable()
 
 defaultInstanceCount = 5
 
@@ -16,7 +21,11 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
     # Input attr
     inputCurveAttr = OpenMaya.MObject()
     inputTransformAttr = OpenMaya.MObject()
+
     instanceCountAttr = OpenMaya.MObject()
+    instancingModeAttr = OpenMaya.MObject()
+    instanceLengthAttr = OpenMaya.MObject()
+
     knownInstancesAttr = OpenMaya.MObject()
     displayTypeAttr = OpenMaya.MObject()
     bboxAttr = OpenMaya.MObject()
@@ -148,6 +157,25 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
     def draw(self, view, path, style, status):
 
+        self.updateInstanceConnections(path)
+
+        # Draw simple locator lines
+        view.beginGL()
+ 
+        glFT.glBegin(OpenMayaRender.MGL_LINES)
+        glFT.glVertex3f(0.0, -0.5, 0.0)
+        glFT.glVertex3f(0.0, 0.5, 0.0)
+        
+        glFT.glVertex3f(0.5, 0.0, 0.0)
+        glFT.glVertex3f(-0.5, 0.0, 0.0)
+
+        glFT.glVertex3f(0.0, 0.0, 0.5)
+        glFT.glVertex3f(0.0, 0.0, -0.5)      
+        glFT.glEnd()
+ 
+        view.endGL()
+
+    def updateInstanceConnections(self, path):
         knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instanceCountAttr)
 
@@ -181,11 +209,16 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 instanceCount = instanceCountPlug.asInt() - knownInstancesPlug.numConnectedElements()
                 availableIndices = self.getAvailableLogicalIndices(knownInstancesPlug, instanceCount)
 
+                nodeFn = OpenMaya.MFnDagNode(path.transform())
+
                 # Instance as many times as necessary
                 for i in availableIndices:
                     
                     # Instance transform and reassign SG
                     trInstance = transformFn.duplicate(True, True)
+
+                    # Parent new instance
+                    nodeFn.addChild(trInstance)
 
                     # TODO: Handle inexistant SG
                     shadingGroupFn.addMember(trInstance)
@@ -226,11 +259,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         # TODO: command
 
         # Ideas:
-        #   - parent all instances under this node
-        #   - show label with amount of current instances
-        #   - locator needs to be easily selected: draw a cross?
         #   - two modes: instanceCount or distanceBetweenInstances
-        #   - max amount of instances
 
         # Update is done in the draw method to prevent being flooded with modifications from the curve callback
         if self.triggerUpdate:
@@ -328,6 +357,7 @@ def nodeInitializer():
     msgAttributeFn = OpenMaya.MFnMessageAttribute()
     curveAttributeFn = OpenMaya.MFnTypedAttribute()
     enumFn = OpenMaya.MFnEnumAttribute()
+    modeEnumFn = OpenMaya.MFnEnumAttribute()
 
     iacNode.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
     msgAttributeFn.setWritable( True )
@@ -345,10 +375,21 @@ def nodeInitializer():
     
     ## Input instance count    
     iacNode.instanceCountAttr = nAttr.create("instanceCount", "iic", OpenMaya.MFnNumericData.kInt, defaultInstanceCount)
+    nAttr.setMin(0)
+    nAttr.setSoftMax(100)
     nAttr.setWritable( True )
     nAttr.setStorable( True )
     nAttr.setHidden( False )
     iacNode.addAttribute( iacNode.instanceCountAttr)
+
+    # Length between instances
+    iacNode.instanceLengthAttr = nAttr.create("instanceLength", "ilength", OpenMaya.MFnNumericData.kFloat, 1.0)
+    nAttr.setMin(0)
+    nAttr.setSoftMax(10)
+    nAttr.setWritable( True )
+    nAttr.setStorable( True )
+    nAttr.setHidden( False )
+    iacNode.addAttribute( iacNode.instanceLengthAttr)
     
     # Input curve transform
     iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'curve')
@@ -357,6 +398,7 @@ def nodeInitializer():
     msgAttributeFn.setHidden( False )
     iacNode.addAttribute( iacNode.inputCurveAttr )
 
+    # Display override options
     iacNode.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
     enumFn.addField( "Normal", 0 );
     enumFn.addField( "Template", 1 );
@@ -366,6 +408,15 @@ def nodeInitializer():
     enumFn.setStorable( True )
     enumFn.setHidden( False )
     iacNode.addAttribute( iacNode.displayTypeAttr )
+
+    # Enum for selection of instancing mode
+    iacNode.instancingModeAttr = modeEnumFn.create('instancingMode', 'instancingMode')
+    modeEnumFn.addField( "Count", 0 );
+    modeEnumFn.addField( "Distance", 1 );
+    modeEnumFn.setWritable( True )
+    modeEnumFn.setStorable( True )
+    modeEnumFn.setHidden( False )
+    iacNode.addAttribute( iacNode.instancingModeAttr )
 
     iacNode.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
     nAttr.setWritable( True )
@@ -386,6 +437,9 @@ def nodeInitializer():
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
+
+        pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
+        # TODO: addmenuItem
         mplugin.registerNode( kPluginNodeName, kPluginNodeId, nodeCreator,
                               nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
     except:
@@ -399,3 +453,39 @@ def uninitializePlugin( mobject ):
     except:
         sys.stderr.write( 'Failed to deregister node: ' + kPluginNodeName )
         raise
+
+
+###############
+# AE TEMPLATE #
+###############
+def loadAETemplateCallback(nodeName):
+    AEiacNodeTemplate(nodeName)
+
+class BaseTemplate(pm.ui.AETemplate):
+
+    def addControl(self, control, label=None, **kwargs):
+        pm.ui.AETemplate.addControl(self, control, label=label, **kwargs)
+
+    def beginLayout(self, name, collapse=True):
+        pm.ui.AETemplate.beginLayout(self, name, collapse=collapse)
+
+class AEiacNodeTemplate(BaseTemplate):
+    def __init__(self, nodeName):
+        BaseTemplate.__init__(self,nodeName)
+        self.thisNode = None
+        self.node = pm.PyNode(self.nodeName)
+
+        self.beginScrollLayout()
+        self.beginLayout("Instance Along Curve Settings" ,collapse=0)
+
+        self.addControl("instancingMode", label="Instancing Mode")
+        self.addControl("instanceLength", label="Instancing Length")
+        self.addControl("instanceCount", label="Instance Count")
+        self.addControl("instanceDisplayType", label="Instance Display Type")
+        self.addControl("instanceBoundingBox", label="Use bounding box")
+        self.addControl("inputCurve", label="Input curve")
+        self.addControl("inputTransform", label="Input object")
+        self.addExtraControls()
+
+        self.endLayout()
+        self.endScrollLayout()
