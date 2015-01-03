@@ -18,10 +18,22 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
     inputTransformAttr = OpenMaya.MObject()
     instanceCountAttr = OpenMaya.MObject()
     knownInstancesAttr = OpenMaya.MObject()
+    displayTypeAttr = OpenMaya.MObject()
+    bboxAttr = OpenMaya.MObject()
+
+    # Output sentinel attr
+    sentinelAttr = OpenMaya.MObject()
 
     def __init__(self):
         self.triggerUpdate = False
         OpenMayaMPx.MPxLocatorNode.__init__(self)
+
+    def __del__(self):
+        OpenMaya.MMessage.removeCallback(self.curveTransformCallback)
+        OpenMaya.MMessage.removeCallback(self.curveCallback)
+
+    def postConstructor(self):
+        OpenMaya.MFnDependencyNode(self.thisMObject()).setName("iacNodeShape#")
 
     # Helper function to get an array of available logical indices from the sparse array
     def getAvailableLogicalIndices(self, plug, numIndices):
@@ -88,12 +100,31 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         # No SG found, just return an empty one
         return OpenMaya.MFnSet()
 
-    def setDrawingOverride(self, nodeFn):
+    def updateDrawingOverrides(self):
+        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
+        drawMode = OpenMaya.MPlug(self.thisMObject(), iacNode.displayTypeAttr).asInt()
+        useBBox = OpenMaya.MPlug(self.thisMObject(), iacNode.bboxAttr).asBool()
+
+        connections = OpenMaya.MPlugArray()
+
+        for i in xrange(knownInstancesPlug.numConnectedElements()):
+
+            knownPlugElement = knownInstancesPlug.elementByPhysicalIndex(i)
+            knownPlugElement.connectedTo(connections, True, False)
+            
+            for c in xrange(0, connections.length()):
+                instanceFn = OpenMaya.MFnTransform(connections[c].node())
+                self.setDrawingOverride(instanceFn, drawMode, useBBox)
+
+    def setDrawingOverride(self, nodeFn, drawMode, useBBox):
         overrideEnabledPlug = nodeFn.findPlug("overrideEnabled", False)
         overrideEnabledPlug.setBool(True)
 
+        displayPlug = nodeFn.findPlug("overrideDisplayType", False)
+        displayPlug.setInt(drawMode)
+
         lodPlug = nodeFn.findPlug("overrideLevelOfDetail", False)
-        lodPlug.setInt(1)
+        lodPlug.setInt(useBBox)
 
     def getCurveFn(self, curvePlug):
 
@@ -103,7 +134,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
             
             if connections.length() == 1:
 
-                # Force a DAG path to get the world transformations correctly
+                # Get Fn from a DAG path to get the world transformations correctly
                 path = OpenMaya.MDagPath()
 
                 trFn = OpenMaya.MFnDagNode(connections[0].node())
@@ -117,15 +148,15 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
     def draw(self, view, path, style, status):
 
-        # Node fn to get plugs
-        nodeFn = OpenMaya.MFnDependencyNode(self.thisMObject())
-        knownInstancesPlug = nodeFn.findPlug(iacNode.knownInstancesAttr, True)
-        instanceCountPlug = nodeFn.findPlug(iacNode.instanceCountAttr, True)
+        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
+        instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instanceCountAttr)
+
+        self.forceCompute()
 
         # Only instance if we are missing elements
         if knownInstancesPlug.numConnectedElements() < instanceCountPlug.asInt():
 
-            inputTransformPlug = nodeFn.findPlug(iacNode.inputTransformAttr, True)
+            inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.inputTransformAttr)
 
             # Get connected input transform plugs 
             inputTransformConnectedPlugs = OpenMaya.MPlugArray()
@@ -136,6 +167,8 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 transform = inputTransformConnectedPlugs[0].node()
                 transformFn = OpenMaya.MFnTransform(transform)
 
+                drawMode = OpenMaya.MPlug(self.thisMObject(), iacNode.displayTypeAttr).asInt()
+                useBBox = OpenMaya.MPlug(self.thisMObject(), iacNode.bboxAttr).asBool()
                 self.triggerUpdate = True
 
                 # Get shading group first
@@ -146,7 +179,6 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 mdgModifier = OpenMaya.MDGModifier()
 
                 instanceCount = instanceCountPlug.asInt() - knownInstancesPlug.numConnectedElements()
-
                 availableIndices = self.getAvailableLogicalIndices(knownInstancesPlug, instanceCount)
 
                 # Instance as many times as necessary
@@ -159,7 +191,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                     shadingGroupFn.addMember(trInstance)
 
                     instanceFn = OpenMaya.MFnTransform(trInstance)
-                    self.setDrawingOverride(instanceFn)
+                    self.setDrawingOverride(instanceFn, drawMode, useBBox)
 
                     instObjGroupsAttr = instanceFn.attribute('message')
                     instPlugArray = OpenMaya.MPlug(trInstance, instObjGroupsAttr)
@@ -169,12 +201,36 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
                 mdgModifier.doIt()
 
-        # TODO: If there are more instances than needed, delete them
-        # elif knownInstancesPlug.numConnectedElements() > instanceCountPlug.asInt():
-        #     triggerUpdate = True
-            #pdb.set_trace()
+        # Remove instances if necessary
+        elif knownInstancesPlug.numConnectedElements() > instanceCountPlug.asInt():
+            self.triggerUpdate = True
 
-        # TODO: CHECK DELETION AND CALLBACK!
+            mdgModifier = OpenMaya.MDGModifier()
+            connections = OpenMaya.MPlugArray()
+            
+            numConnectedElements = knownInstancesPlug.numConnectedElements()
+            toRemove = knownInstancesPlug.numConnectedElements() - instanceCountPlug.asInt()
+
+            for i in xrange(toRemove):
+
+                knownPlugElement = knownInstancesPlug.connectionByPhysicalIndex(numConnectedElements - 1 - i)
+                knownPlugElement.connectedTo(connections, True, False)
+                
+                for c in xrange(connections.length()):
+                    node = connections[c].node()
+                    mdgModifier.disconnect(connections[c], knownPlugElement)
+                    mdgModifier.deleteNode(node)
+
+            mdgModifier.doIt()
+
+        # TODO: command
+
+        # Ideas:
+        #   - parent all instances under this node
+        #   - show label with amount of current instances
+        #   - locator needs to be easily selected: draw a cross?
+        #   - two modes: instanceCount or distanceBetweenInstances
+        #   - max amount of instances
 
         # Update is done in the draw method to prevent being flooded with modifications from the curve callback
         if self.triggerUpdate:
@@ -186,36 +242,32 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
     def updateInstancePositions(self):
 
-        nodeFn = OpenMaya.MFnDependencyNode(self.thisMObject())
-        knownInstancesPlug = nodeFn.findPlug(iacNode.knownInstancesAttr, True)
-        inputCurvePlug = nodeFn.findPlug(iacNode.inputCurveAttr, True)
+        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
+        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), iacNode.inputCurveAttr)
 
         if inputCurvePlug.isConnected():
 
             fnCurve = self.getCurveFn(inputCurvePlug)
             curveLength = fnCurve.length()
 
-            connectedIndices = OpenMaya.MIntArray()
-            knownInstancesPlug.getExistingArrayAttributeIndices(connectedIndices)
-
-            connections = OpenMaya.MPlugArray()
-            
+            numConnectedElements = knownInstancesPlug.numConnectedElements()
             point = OpenMaya.MPoint()
+            connections = OpenMaya.MPlugArray()          
 
             # TODO: let the user decide forward axis?
             startOrientation = OpenMaya.MVector(0.0, 0.0, 1.0)
             curvePointIndex = 0
 
-            for i in connectedIndices:
+            for i in xrange(numConnectedElements):
 
-                param = fnCurve.findParamFromLength(curveLength * (float(curvePointIndex) / connectedIndices.length()))
+                param = fnCurve.findParamFromLength(curveLength * (float(curvePointIndex) / numConnectedElements))
                 fnCurve.getPointAtParam(param, point, OpenMaya.MSpace.kWorld)
                 tangent = fnCurve.tangent(param, OpenMaya.MSpace.kWorld)
                 rot = startOrientation.rotateTo(tangent)
 
                 curvePointIndex += 1
 
-                knownPlugElement = knownInstancesPlug.elementByLogicalIndex(i)
+                knownPlugElement = knownInstancesPlug.elementByPhysicalIndex(i)
                 knownPlugElement.connectedTo(connections, True, False)
                 
                 for c in xrange(0, connections.length()):
@@ -223,7 +275,15 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                     instanceFn.setTranslation(OpenMaya.MVector(point), OpenMaya.MSpace.kTransform)
                     instanceFn.setRotation(rot)
 
+    # Remember to remove callbacks on disconnection
+    def connectionBroken(self, plug, otherPlug, asSrc):
+        if plug.attribute() == iacNode.inputCurveAttr:
+            OpenMaya.MMessage.removeCallback(self.curveTransformCallback)
+            OpenMaya.MMessage.removeCallback(self.curveCallback)
 
+        return OpenMaya.kUnknownParameter
+
+    # Get notified when curve shape and transform is modified
     def connectionMade(self, plug, otherPlug, asSrc):
         if plug.attribute() == iacNode.inputCurveAttr:
 
@@ -235,10 +295,26 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
             dagPath.extendToShape()
 
             # Get callbacks for shape and transform modifications
-            OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(otherPlug.node(), curveChangedCallback, self)
-            OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(dagPath.node(), curveChangedCallback, self)
+            self.curveTransformCallback = OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(otherPlug.node(), curveChangedCallback, self)
+            self.curveCallback = OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(dagPath.node(), curveChangedCallback, self)
+
+            # Update instantly
+            self.triggerUpdate = True
         
         return OpenMaya.kUnknownParameter
+
+    # Compute method just for updating current instances display attributes
+    def compute(self, plug, dataBlock):
+
+        if plug == iacNode.sentinelAttr:
+            self.updateDrawingOverrides()
+            dataBlock.setClean(iacNode.sentinelAttr)
+
+        return OpenMaya.kUnknownParameter
+
+    # Query the sentinel value to force an evaluation
+    def forceCompute(self):
+        OpenMaya.MPlug(self.thisMObject(), iacNode.sentinelAttr).asInt()
 
 def curveChangedCallback(node, plug, self):
     self.triggerUpdate = True
@@ -251,6 +327,7 @@ def nodeInitializer():
     nAttr = OpenMaya.MFnNumericAttribute()
     msgAttributeFn = OpenMaya.MFnMessageAttribute()
     curveAttributeFn = OpenMaya.MFnTypedAttribute()
+    enumFn = OpenMaya.MFnEnumAttribute()
 
     iacNode.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
     msgAttributeFn.setWritable( True )
@@ -259,7 +336,7 @@ def nodeInitializer():
     iacNode.addAttribute( iacNode.inputTransformAttr )
 
     iacNode.knownInstancesAttr = msgAttributeFn.create("knownInstances", "ki")
-    msgAttributeFn.setWritable( True )    
+    msgAttributeFn.setWritable( True )
     msgAttributeFn.setStorable( True )    
     msgAttributeFn.setHidden( True )  
     msgAttributeFn.setArray( True )  
@@ -279,6 +356,32 @@ def nodeInitializer():
     msgAttributeFn.setStorable( True ) 
     msgAttributeFn.setHidden( False )
     iacNode.addAttribute( iacNode.inputCurveAttr )
+
+    iacNode.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
+    enumFn.addField( "Normal", 0 );
+    enumFn.addField( "Template", 1 );
+    enumFn.addField( "Reference", 2 );
+    enumFn.setDefault("Reference")
+    enumFn.setWritable( True )
+    enumFn.setStorable( True )
+    enumFn.setHidden( False )
+    iacNode.addAttribute( iacNode.displayTypeAttr )
+
+    iacNode.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
+    nAttr.setWritable( True )
+    nAttr.setStorable( True )
+    nAttr.setHidden( False )
+    iacNode.addAttribute( iacNode.bboxAttr )
+
+    iacNode.sentinelAttr = nAttr.create('sentinel', 's', OpenMaya.MFnNumericData.kInt, 0)
+    nAttr.setWritable( False )
+    nAttr.setStorable( False )
+    nAttr.setReadable( True )
+    nAttr.setHidden( True )
+    iacNode.addAttribute( iacNode.sentinelAttr )
+
+    iacNode.attributeAffects( iacNode.displayTypeAttr, iacNode.sentinelAttr )
+    iacNode.attributeAffects( iacNode.bboxAttr, iacNode.sentinelAttr )
 
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
