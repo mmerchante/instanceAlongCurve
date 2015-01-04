@@ -1,26 +1,22 @@
 import sys
-import pdb
 import pymel.core as pm
 import maya.OpenMayaMPx as OpenMayaMPx
 import maya.OpenMaya as OpenMaya
 import maya.OpenMayaRender as OpenMayaRender
-import inspect
-import random
 
-kPluginNodeName = 'iacNode'
+kPluginCmdName = "instanceAlongCurve"
+kPluginNodeName = 'instanceAlongCurveLocator'
 kPluginNodeClassify = 'utility/general'
 kPluginNodeId = OpenMaya.MTypeId( 0x55555 ) 
 
 glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
-# TODO: command
-
 # Ideas:
 #   - three orientation modes: no orientation, tangent, normal
 #   - orientation constraints: set a fixed axis?
 
-class iacNode(OpenMayaMPx.MPxLocatorNode):
+class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Input attr
     inputCurveAttr = OpenMaya.MObject()
@@ -43,7 +39,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         OpenMayaMPx.MPxLocatorNode.__init__(self)
 
     def postConstructor(self):
-        OpenMaya.MFnDependencyNode(self.thisMObject()).setName("iacNodeShape#")
+        OpenMaya.MFnDependencyNode(self.thisMObject()).setName("instanceAlongCurveLocatorShape#")
 
     # Helper function to get an array of available logical indices from the sparse array
     def getAvailableLogicalIndices(self, plug, numIndices):
@@ -111,9 +107,9 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         return OpenMaya.MFnSet()
 
     def updateDrawingOverrides(self):
-        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
-        drawMode = OpenMaya.MPlug(self.thisMObject(), iacNode.displayTypeAttr).asInt()
-        useBBox = OpenMaya.MPlug(self.thisMObject(), iacNode.bboxAttr).asBool()
+        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.knownInstancesAttr)
+        drawMode = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr).asInt()
+        useBBox = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.bboxAttr).asBool()
 
         connections = OpenMaya.MPlugArray()
 
@@ -178,28 +174,28 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
     # Calculate expected instances by the instancing mode
     def getInstanceCountByMode(self):
-        instancingModePlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instancingModeAttr)
-        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), iacNode.inputCurveAttr)
+        instancingModePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instancingModeAttr)
+        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
 
         if inputCurvePlug.isConnected() and instancingModePlug.asInt() == 1:
-            instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instanceLengthAttr)
-            maxInstancesByLengthPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.maxInstancesByLengthAttr)
+            instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceLengthAttr)
+            maxInstancesByLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.maxInstancesByLengthAttr)
             curveFn = self.getCurveFn(inputCurvePlug)
             return min(maxInstancesByLengthPlug.asInt(), int(curveFn.length() / instanceLengthPlug.asFloat()))
 
-        instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.instanceCountAttr)
+        instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
         return instanceCountPlug.asInt()
 
     def updateInstanceConnections(self, path):
         expectedInstanceCount = self.getInstanceCountByMode()
-        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
+        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.knownInstancesAttr)
 
         self.forceCompute()
 
         # Only instance if we are missing elements
         if knownInstancesPlug.numConnectedElements() < expectedInstanceCount:
 
-            inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.inputTransformAttr)
+            inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
 
             # Get connected input transform plugs 
             inputTransformConnectedPlugs = OpenMaya.MPlugArray()
@@ -210,8 +206,8 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
                 transform = inputTransformConnectedPlugs[0].node()
                 transformFn = OpenMaya.MFnTransform(transform)
 
-                drawMode = OpenMaya.MPlug(self.thisMObject(), iacNode.displayTypeAttr).asInt()
-                useBBox = OpenMaya.MPlug(self.thisMObject(), iacNode.bboxAttr).asBool()
+                drawMode = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr).asInt()
+                useBBox = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.bboxAttr).asBool()
                 self.triggerUpdate = True
 
                 # Get shading group first
@@ -281,8 +277,8 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
     def updateInstancePositions(self):
 
-        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), iacNode.knownInstancesAttr)
-        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), iacNode.inputCurveAttr)
+        knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.knownInstancesAttr)
+        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
 
         if inputCurvePlug.isConnected():
 
@@ -316,7 +312,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
     # Remember to remove callbacks on disconnection
     def connectionBroken(self, plug, otherPlug, asSrc):
-        if plug.attribute() == iacNode.inputCurveAttr:
+        if plug.attribute() == instanceAlongCurveLocator.inputCurveAttr:
             OpenMaya.MMessage.removeCallback(self.curveTransformCallback)
             OpenMaya.MMessage.removeCallback(self.curveCallback)
 
@@ -324,7 +320,7 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
 
     # Get notified when curve shape and transform is modified
     def connectionMade(self, plug, otherPlug, asSrc):
-        if plug.attribute() == iacNode.inputCurveAttr:
+        if plug.attribute() == instanceAlongCurveLocator.inputCurveAttr:
 
             dagPath = OpenMaya.MDagPath()
 
@@ -345,19 +341,19 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
     # Compute method just for updating current instances display attributes
     def compute(self, plug, dataBlock):
 
-        if plug == iacNode.sentinelAttr:
+        if plug == instanceAlongCurveLocator.sentinelAttr:
             self.updateDrawingOverrides()
-            dataBlock.setClean(iacNode.sentinelAttr)
+            dataBlock.setClean(instanceAlongCurveLocator.sentinelAttr)
 
         return OpenMaya.kUnknownParameter
 
     # Query the sentinel value to force an evaluation
     def forceCompute(self):
-        OpenMaya.MPlug(self.thisMObject(), iacNode.sentinelAttr).asInt()
+        OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.sentinelAttr).asInt()
 
     @staticmethod
     def nodeCreator():
-        return OpenMayaMPx.asMPxPtr( iacNode() )
+        return OpenMayaMPx.asMPxPtr( instanceAlongCurveLocator() )
 
     @staticmethod
     def nodeInitializer():
@@ -368,56 +364,56 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         enumFn = OpenMaya.MFnEnumAttribute()
         modeEnumFn = OpenMaya.MFnEnumAttribute()
 
-        iacNode.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
+        instanceAlongCurveLocator.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
         msgAttributeFn.setWritable( True )
         msgAttributeFn.setStorable( True )
         msgAttributeFn.setHidden( False )
-        iacNode.addAttribute( iacNode.inputTransformAttr )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.inputTransformAttr )
 
-        iacNode.knownInstancesAttr = msgAttributeFn.create("knownInstances", "ki")
+        instanceAlongCurveLocator.knownInstancesAttr = msgAttributeFn.create("knownInstances", "ki")
         msgAttributeFn.setWritable( True )
         msgAttributeFn.setStorable( True )    
         msgAttributeFn.setHidden( True )  
         msgAttributeFn.setArray( True )  
         msgAttributeFn.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete) # Very important :)
-        iacNode.addAttribute( iacNode.knownInstancesAttr )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.knownInstancesAttr )
         
         ## Input instance count    
-        iacNode.instanceCountAttr = nAttr.create("instanceCount", "iic", OpenMaya.MFnNumericData.kInt, 5)
+        instanceAlongCurveLocator.instanceCountAttr = nAttr.create("instanceCount", "iic", OpenMaya.MFnNumericData.kInt, 5)
         nAttr.setMin(0)
         nAttr.setSoftMax(100)
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
-        iacNode.addAttribute( iacNode.instanceCountAttr)
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.instanceCountAttr)
 
         ## Max instances when defined by instance length
-        iacNode.maxInstancesByLengthAttr = nAttr.create("maxInstancesByLength", "mibl", OpenMaya.MFnNumericData.kInt, 50)
+        instanceAlongCurveLocator.maxInstancesByLengthAttr = nAttr.create("maxInstancesByLength", "mibl", OpenMaya.MFnNumericData.kInt, 50)
         nAttr.setMin(0)
         nAttr.setSoftMax(200)
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
-        iacNode.addAttribute( iacNode.maxInstancesByLengthAttr)
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.maxInstancesByLengthAttr)
 
         # Length between instances
-        iacNode.instanceLengthAttr = nAttr.create("instanceLength", "ilength", OpenMaya.MFnNumericData.kFloat, 1.0)
+        instanceAlongCurveLocator.instanceLengthAttr = nAttr.create("instanceLength", "ilength", OpenMaya.MFnNumericData.kFloat, 1.0)
         nAttr.setMin(0.01)
         nAttr.setSoftMax(10)
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
-        iacNode.addAttribute( iacNode.instanceLengthAttr)
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.instanceLengthAttr)
         
         # Input curve transform
-        iacNode.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'curve')
+        instanceAlongCurveLocator.inputCurveAttr = msgAttributeFn.create( 'inputCurve', 'curve')
         msgAttributeFn.setWritable( True )
         msgAttributeFn.setStorable( True ) 
         msgAttributeFn.setHidden( False )
-        iacNode.addAttribute( iacNode.inputCurveAttr )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.inputCurveAttr )
 
         # Display override options
-        iacNode.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
+        instanceAlongCurveLocator.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
         enumFn.addField( "Normal", 0 );
         enumFn.addField( "Template", 1 );
         enumFn.addField( "Reference", 2 );
@@ -425,32 +421,32 @@ class iacNode(OpenMayaMPx.MPxLocatorNode):
         enumFn.setWritable( True )
         enumFn.setStorable( True )
         enumFn.setHidden( False )
-        iacNode.addAttribute( iacNode.displayTypeAttr )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.displayTypeAttr )
 
         # Enum for selection of instancing mode
-        iacNode.instancingModeAttr = modeEnumFn.create('instancingMode', 'instancingMode')
+        instanceAlongCurveLocator.instancingModeAttr = modeEnumFn.create('instancingMode', 'instancingMode')
         modeEnumFn.addField( "Count", 0 );
         modeEnumFn.addField( "Distance", 1 );
         modeEnumFn.setWritable( True )
         modeEnumFn.setStorable( True )
         modeEnumFn.setHidden( False )
-        iacNode.addAttribute( iacNode.instancingModeAttr )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.instancingModeAttr )
 
-        iacNode.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
+        instanceAlongCurveLocator.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
-        iacNode.addAttribute( iacNode.bboxAttr )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.bboxAttr )
 
-        iacNode.sentinelAttr = nAttr.create('sentinel', 's', OpenMaya.MFnNumericData.kInt, 0)
+        instanceAlongCurveLocator.sentinelAttr = nAttr.create('sentinel', 's', OpenMaya.MFnNumericData.kInt, 0)
         nAttr.setWritable( False )
         nAttr.setStorable( False )
         nAttr.setReadable( True )
         nAttr.setHidden( True )
-        iacNode.addAttribute( iacNode.sentinelAttr )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.sentinelAttr )
 
-        iacNode.attributeAffects( iacNode.displayTypeAttr, iacNode.sentinelAttr )
-        iacNode.attributeAffects( iacNode.bboxAttr, iacNode.sentinelAttr )
+        instanceAlongCurveLocator.attributeAffects( instanceAlongCurveLocator.displayTypeAttr, instanceAlongCurveLocator.sentinelAttr )
+        instanceAlongCurveLocator.attributeAffects( instanceAlongCurveLocator.bboxAttr, instanceAlongCurveLocator.sentinelAttr )
 
 def curveChangedCallback(node, plug, self):
     self.triggerUpdate = True
@@ -458,31 +454,38 @@ def curveChangedCallback(node, plug, self):
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
+        # Register command
+        # TODO: addmenuItem
+        mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
 
+        mplugin.addMenuItem("Instance Along Curve", "MayaWindow|mainEditMenu", kPluginCmdName, "")
+
+        # Register AE template
         pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
 
-        # TODO: addmenuItem
-        mplugin.registerNode( kPluginNodeName, kPluginNodeId, iacNode.nodeCreator,
-                              iacNode.nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
+        # Register node
+        mplugin.registerNode( kPluginNodeName, kPluginNodeId, instanceAlongCurveLocator.nodeCreator,
+                              instanceAlongCurveLocator.nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
     except:
-        sys.stderr.write( 'Failed to register node: ' + kPluginNodeName )
+        sys.stderr.write( 'Failed to register plugin instanceAlongCurve')
         raise
     
 def uninitializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
+        mplugin.deregisterCommand( kPluginCmdName )
         mplugin.deregisterNode( kPluginNodeId )
     except:
-        sys.stderr.write( 'Failed to deregister node: ' + kPluginNodeName )
+        sys.stderr.write( 'Failed to deregister plugin instanceAlongCurve')
         raise
 
 ###############
 # AE TEMPLATE #
 ###############
 def loadAETemplateCallback(nodeName):
-    AEiacNodeTemplate(nodeName)
+    AEinstanceAlongCurveLocatorTemplate(nodeName)
 
-class BaseTemplate(pm.ui.AETemplate):
+class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
     def addControl(self, control, label=None, **kwargs):
         pm.ui.AETemplate.addControl(self, control, label=label, **kwargs)
@@ -490,33 +493,33 @@ class BaseTemplate(pm.ui.AETemplate):
     def beginLayout(self, name, collapse=True):
         pm.ui.AETemplate.beginLayout(self, name, collapse=collapse)
 
-class AEiacNodeTemplate(BaseTemplate):
     def __init__(self, nodeName):
-        BaseTemplate.__init__(self,nodeName)
+        pm.ui.AETemplate.__init__(self,nodeName)
         self.thisNode = None
         self.node = pm.PyNode(self.nodeName)
 
-        self.beginScrollLayout()
-        self.beginLayout("Instance Along Curve Settings" ,collapse=0)
+        if self.node.type() == kPluginNodeName:
+            self.beginScrollLayout()
+            self.beginLayout("Instance Along Curve Settings" ,collapse=0)
 
-        self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
-        self.addControl("instanceCount", label="Count")
-        self.addControl("instanceLength", label="Distance")
-        self.addControl("maxInstancesByLength", label="Max Instances")
-        
-        self.addSeparator()
-        
-        self.addControl("instanceDisplayType", label="Instance Display Type")
-        self.addControl("instanceBoundingBox", label="Use bounding box")
-        
-        self.addSeparator()
-        
-        self.addControl("inputCurve", label="Input curve")
-        self.addControl("inputTransform", label="Input object")
-        self.addExtraControls()
+            self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
+            self.addControl("instanceCount", label="Count")
+            self.addControl("instanceLength", label="Distance")
+            self.addControl("maxInstancesByLength", label="Max Instances")
+            
+            self.addSeparator()
+            
+            self.addControl("instanceDisplayType", label="Instance Display Type")
+            self.addControl("instanceBoundingBox", label="Use bounding box")
+            
+            self.addSeparator()
+            
+            self.addControl("inputCurve", label="Input curve")
+            self.addControl("inputTransform", label="Input object")
+            self.addExtraControls()
 
-        self.endLayout()
-        self.endScrollLayout()
+            self.endLayout()
+            self.endScrollLayout()
 
     def onInstanceModeChanged(self, nodeName):
         if pm.PyNode(nodeName).type() == kPluginNodeName:
@@ -525,3 +528,82 @@ class AEiacNodeTemplate(BaseTemplate):
             self.dimControl(nodeName, "instanceLength", mode == 0)
             self.dimControl(nodeName, "maxInstancesByLength", mode == 0)
             self.dimControl(nodeName, "instanceCount", mode == 1)
+            # TODO: dim everything if there is no curve or transform
+
+# Command
+class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
+
+    def __init__(self):
+        OpenMayaMPx.MPxCommand.__init__(self)
+        self.mUndo = []
+
+    def isUndoable(self):
+        return True
+
+    def undoIt(self): 
+        OpenMaya.MGlobal.displayInfo( "Undo: instanceAlongCurveCommand\n" )
+
+        # Reversed for undo :)
+        for m in reversed(self.mUndo):
+            m.undoIt()
+
+    def redoIt(self): 
+        OpenMaya.MGlobal.displayInfo( "Redo: instanceAlongCurveCommand\n" )
+        
+        for m in self.mUndo:
+            m.doIt()
+        
+    def doIt(self,argList):
+            
+        list = OpenMaya.MSelectionList()
+        OpenMaya.MGlobal.getActiveSelectionList(list)
+
+        if list.length() == 2:
+            curveDagPath = OpenMaya.MDagPath()
+            list.getDagPath(0, curveDagPath)
+            curveDagPath.extendToShape()
+
+            shapeDagPath = OpenMaya.MDagPath()
+            list.getDagPath(1, shapeDagPath)           
+
+            if(curveDagPath.node().hasFn(OpenMaya.MFn.kNurbsCurve)):
+
+                # We need the curve transform
+                curveTransformFn = OpenMaya.MFnDagNode(curveDagPath.transform())
+                curveTransformPlug = curveTransformFn.findPlug("message", True)
+
+                # We need the shape's transform too
+                transformFn = OpenMaya.MFnDagNode(shapeDagPath.transform())
+                transformMessagePlug = transformFn.findPlug("message", True)
+
+                # Create node first
+                mdagModifier = OpenMaya.MDagModifier()
+                self.mUndo.append(mdagModifier)
+                newNode = mdagModifier.createNode(kPluginNodeId)
+                mdagModifier.doIt()
+
+                # Assign new correct name
+                newNodeFn = OpenMaya.MFnDagNode(newNode)
+                newNodeFn.setName("instanceAlongCurveLocator#")
+
+                # Get the node shape
+                nodeShapeDagPath = OpenMaya.MDagPath()
+                newNodeFn.getPath(nodeShapeDagPath)
+                nodeShapeDagPath.extendToShape()
+                newNodeFn = OpenMaya.MFnDagNode(nodeShapeDagPath)
+
+                # Connect :D
+                mdgModifier = OpenMaya.MDGModifier()
+                self.mUndo.append(mdgModifier)               
+                mdgModifier.connect(curveTransformPlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr))
+                mdgModifier.connect(transformMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputTransformAttr))
+                mdgModifier.doIt()
+
+            else:
+                sys.stderr.write("Please select a curve first")
+        else:
+            sys.stderr.write("Please select a curve and a shape")
+
+    @staticmethod
+    def cmdCreator():
+        return OpenMayaMPx.asMPxPtr( instanceAlongCurveCommand() )
