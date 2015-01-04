@@ -582,7 +582,7 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                 newNode = mdagModifier.createNode(kPluginNodeId)
                 mdagModifier.doIt()
 
-                # Assign new correct name
+                # Assign new correct name and select new locator
                 newNodeFn = OpenMaya.MFnDagNode(newNode)
                 newNodeFn.setName("instanceAlongCurveLocator#")
 
@@ -592,13 +592,18 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                 nodeShapeDagPath.extendToShape()
                 newNodeFn = OpenMaya.MFnDagNode(nodeShapeDagPath)
 
+                OpenMaya.MGlobal.clearSelectionList()
+                msel = OpenMaya.MSelectionList()
+                msel.add(nodeShapeDagPath)
+                OpenMaya.MGlobal.setActiveSelectionList(msel)
+
                 # Connect :D
                 mdgModifier = OpenMaya.MDGModifier()
                 self.mUndo.append(mdgModifier)               
                 mdgModifier.connect(curveTransformPlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr))
                 mdgModifier.connect(transformMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputTransformAttr))
                 mdgModifier.doIt()
-
+                
             else:
                 sys.stderr.write("Please select a curve first")
         else:
