@@ -6,6 +6,9 @@ Instance Along Curve
 ### About
 Maya Plugin for interactive instancing of shapes along curves.
 
+### Features
+![Features1](iac_1.gif)
+
 ### Installation
 
 Save instanceAlongCurve.py under MAYA_PLUG_IN_PATH, which in Windows usually is C:\Users\<username>\Documents\maya\<version>\plug-ins
