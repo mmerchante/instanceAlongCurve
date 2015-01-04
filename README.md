@@ -3,8 +3,6 @@
 Instance Along Curve
 ==================
 
----
-
 ### About
 Maya Plugin for interactive instancing of shapes along curves.
 
