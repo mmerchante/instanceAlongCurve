@@ -13,8 +13,10 @@ glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
 # Ideas:
-#   - three orientation modes: no orientation, tangent, normal
 #   - orientation constraints: set a fixed axis?
+#   - twisting
+#   - scale modes
+#   - modulate attributes (pos, rot, scale) along curve's parameter space through user curves
 
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
@@ -31,8 +33,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     displayTypeAttr = OpenMaya.MObject()
     bboxAttr = OpenMaya.MObject()
 
-    # Output sentinel attr
+    orientationModeAttr = OpenMaya.MObject()
+
+    # Output sentinel attr for display overrides
     sentinelAttr = OpenMaya.MObject()
+
+    # Output sentinel attr for refreshing positioning/orientation
+    sentinelPositioningAttr = OpenMaya.MObject()
 
     def __init__(self):
         self.triggerUpdate = False
@@ -131,6 +138,28 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         lodPlug = nodeFn.findPlug("overrideLevelOfDetail", False)
         lodPlug.setInt(useBBox)
+
+    def getInputTransformFn(self):
+
+        inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
+
+        if inputTransformPlug.isConnected():
+
+            # Get connected input transform plugs 
+            connections = OpenMaya.MPlugArray()
+            inputTransformPlug.connectedTo(connections, True, False)
+
+            # Find input transform
+            if connections.length() == 1:
+                
+                # Get Fn from a DAG path to get the world transformations correctly
+                path = OpenMaya.MDagPath()
+                trFn = OpenMaya.MFnDagNode(connections[0].node())
+                trFn.getPath(path)
+
+                return OpenMaya.MFnTransform(path)
+
+        return OpenMaya.MFnTransform()
 
     def getCurveFn(self, curvePlug):
 
@@ -282,12 +311,20 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         if inputCurvePlug.isConnected():
 
+            rotMode = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.orientationModeAttr).asInt()
+
+            inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
+            inputTransformRotation = OpenMaya.MQuaternion()
+
+            if inputTransformPlug.isConnected():
+                self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
+
             fnCurve = self.getCurveFn(inputCurvePlug)
             curveLength = fnCurve.length()
 
             numConnectedElements = knownInstancesPlug.numConnectedElements()
             point = OpenMaya.MPoint()
-            connections = OpenMaya.MPlugArray()          
+            connections = OpenMaya.MPlugArray()
 
             # TODO: let the user decide forward axis?
             startOrientation = OpenMaya.MVector(0.0, 0.0, 1.0)
@@ -297,24 +334,42 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                 param = fnCurve.findParamFromLength(curveLength * (float(curvePointIndex) / numConnectedElements))
                 fnCurve.getPointAtParam(param, point, OpenMaya.MSpace.kWorld)
-                tangent = fnCurve.tangent(param, OpenMaya.MSpace.kWorld)
-                rot = startOrientation.rotateTo(tangent)
+
+                rot = OpenMaya.MQuaternion()
+
+                if rotMode == 1:
+                    rot = inputTransformRotation;
+                elif rotMode == 2:
+                    normal = fnCurve.normal(param, OpenMaya.MSpace.kWorld)
+                    rot = startOrientation.rotateTo(normal)
+                elif rotMode == 3:
+                    tangent = fnCurve.tangent(param, OpenMaya.MSpace.kWorld)
+                    rot = startOrientation.rotateTo(tangent)
 
                 curvePointIndex += 1
 
                 knownPlugElement = knownInstancesPlug.elementByPhysicalIndex(i)
                 knownPlugElement.connectedTo(connections, True, False)
+
+                instanceDagPath = OpenMaya.MDagPath()
                 
                 for c in xrange(0, connections.length()):
+                    # Is there a nicer way to do this? dagPath is needed to use kWorld
                     instanceFn = OpenMaya.MFnTransform(connections[c].node())
-                    instanceFn.setTranslation(OpenMaya.MVector(point), OpenMaya.MSpace.kTransform)
-                    instanceFn.setRotation(rot)
+                    instanceFn.getPath(instanceDagPath)
+                    instanceFn = OpenMaya.MFnTransform(instanceDagPath)
+
+                    instanceFn.setTranslation(OpenMaya.MVector(point), OpenMaya.MSpace.kWorld)
+                    instanceFn.setRotation(rot, OpenMaya.MSpace.kWorld)
 
     # Remember to remove callbacks on disconnection
     def connectionBroken(self, plug, otherPlug, asSrc):
         if plug.attribute() == instanceAlongCurveLocator.inputCurveAttr:
             OpenMaya.MMessage.removeCallback(self.curveTransformCallback)
             OpenMaya.MMessage.removeCallback(self.curveCallback)
+
+        if plug.attribute() == instanceAlongCurveLocator.inputTransformAttr:
+            OpenMaya.MMessage.removeCallback(self.inputTransformCallback)
 
         return OpenMaya.kUnknownParameter
 
@@ -330,8 +385,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             dagPath.extendToShape()
 
             # Get callbacks for shape and transform modifications
-            self.curveTransformCallback = OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(otherPlug.node(), curveChangedCallback, self)
-            self.curveCallback = OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(dagPath.node(), curveChangedCallback, self)
+            self.curveTransformCallback = OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(otherPlug.node(), updatePositioningCallback, self)
+            self.curveCallback = OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(dagPath.node(), updatePositioningCallback, self)
+
+            # Update instantly
+            self.triggerUpdate = True
+
+        if plug.attribute() == instanceAlongCurveLocator.inputTransformAttr:
+            self.inputTransformCallback = OpenMaya.MNodeMessage.addNodeDirtyPlugCallback(otherPlug.node(), updatePositioningCallback, self)
 
             # Update instantly
             self.triggerUpdate = True
@@ -345,11 +406,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             self.updateDrawingOverrides()
             dataBlock.setClean(instanceAlongCurveLocator.sentinelAttr)
 
+        if plug == instanceAlongCurveLocator.sentinelPositioningAttr:
+            self.updateInstancePositions()
+            dataBlock.setClean(instanceAlongCurveLocator.sentinelPositioningAttr)            
+
         return OpenMaya.kUnknownParameter
 
-    # Query the sentinel value to force an evaluation
+    # Query the sentinels' value to force an evaluation
     def forceCompute(self):
         OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.sentinelAttr).asInt()
+        OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.sentinelPositioningAttr).asInt()
 
     @staticmethod
     def nodeCreator():
@@ -362,7 +428,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         msgAttributeFn = OpenMaya.MFnMessageAttribute()
         curveAttributeFn = OpenMaya.MFnTypedAttribute()
         enumFn = OpenMaya.MFnEnumAttribute()
-        modeEnumFn = OpenMaya.MFnEnumAttribute()
 
         instanceAlongCurveLocator.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
         msgAttributeFn.setWritable( True )
@@ -399,7 +464,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         # Length between instances
         instanceAlongCurveLocator.instanceLengthAttr = nAttr.create("instanceLength", "ilength", OpenMaya.MFnNumericData.kFloat, 1.0)
         nAttr.setMin(0.01)
-        nAttr.setSoftMax(10)
+        nAttr.setSoftMax(1.0)
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
@@ -424,13 +489,25 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.displayTypeAttr )
 
         # Enum for selection of instancing mode
-        instanceAlongCurveLocator.instancingModeAttr = modeEnumFn.create('instancingMode', 'instancingMode')
-        modeEnumFn.addField( "Count", 0 );
-        modeEnumFn.addField( "Distance", 1 );
-        modeEnumFn.setWritable( True )
-        modeEnumFn.setStorable( True )
-        modeEnumFn.setHidden( False )
+        instanceAlongCurveLocator.instancingModeAttr = enumFn.create('instancingMode', 'instancingMode')
+        enumFn.addField( "Count", 0 );
+        enumFn.addField( "Distance", 1 );
+        enumFn.setWritable( True )
+        enumFn.setStorable( True )
+        enumFn.setHidden( False )
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.instancingModeAttr )
+
+         # Enum for selection of orientation mode
+        instanceAlongCurveLocator.orientationModeAttr = enumFn.create('orientationMode', 'rotMode')
+        enumFn.addField( "Identity", 0 );
+        enumFn.addField( "Copy from Source", 1 );
+        enumFn.addField( "Normal", 2 );
+        enumFn.addField( "Tangent", 3 );
+        enumFn.setDefault("Tangent")
+        enumFn.setWritable( True )
+        enumFn.setStorable( True )
+        enumFn.setHidden( False )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.orientationModeAttr )
 
         instanceAlongCurveLocator.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
         nAttr.setWritable( True )
@@ -438,6 +515,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setHidden( False )
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.bboxAttr )
 
+        ## Output attributes
+
+        # Sentinel to update display overrides
         instanceAlongCurveLocator.sentinelAttr = nAttr.create('sentinel', 's', OpenMaya.MFnNumericData.kInt, 0)
         nAttr.setWritable( False )
         nAttr.setStorable( False )
@@ -445,10 +525,21 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setHidden( True )
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.sentinelAttr )
 
+        # Sentinel to update positions/orientations
+        instanceAlongCurveLocator.sentinelPositioningAttr = nAttr.create('sentinelPos', 'sPos', OpenMaya.MFnNumericData.kInt, 0)
+        nAttr.setWritable( False )
+        nAttr.setStorable( False )
+        nAttr.setReadable( True )
+        nAttr.setHidden( True )
+        instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.sentinelPositioningAttr )
+
+        # Attribute relationships
         instanceAlongCurveLocator.attributeAffects( instanceAlongCurveLocator.displayTypeAttr, instanceAlongCurveLocator.sentinelAttr )
         instanceAlongCurveLocator.attributeAffects( instanceAlongCurveLocator.bboxAttr, instanceAlongCurveLocator.sentinelAttr )
 
-def curveChangedCallback(node, plug, self):
+        instanceAlongCurveLocator.attributeAffects( instanceAlongCurveLocator.orientationModeAttr, instanceAlongCurveLocator.sentinelPositioningAttr )
+
+def updatePositioningCallback(node, plug, self):
     self.triggerUpdate = True
 
 def initializePlugin( mobject ):
@@ -507,6 +598,10 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.addControl("instanceLength", label="Distance")
             self.addControl("maxInstancesByLength", label="Max Instances")
             
+            self.addSeparator()
+
+            self.addControl("orientationMode", label="Orientation Mode")
+
             self.addSeparator()
             
             self.addControl("instanceDisplayType", label="Instance Display Type")
