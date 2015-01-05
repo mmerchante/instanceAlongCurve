@@ -119,6 +119,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         lodPlug = nodeFn.findPlug("overrideLevelOfDetail", False)
         lodPlug.setInt(useBBox)
 
+    def hasShapeBelow(self, dagPath):
+
+        sutil = OpenMaya.MScriptUtil()
+        uintptr = sutil.asUintPtr()
+        sutil.setUint(uintptr , 0)
+
+        dagPath.numberOfShapesDirectlyBelow(uintptr)
+
+        return uintptr > 0
 
     # Find original SG to reassign it to instance
     def getSG(self):
@@ -679,88 +688,103 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
         for m in self.mUndo:
             m.doIt()
 
+    def hasShapeBelow(self, dagPath):
+
+        sutil = OpenMaya.MScriptUtil()
+        uintptr = sutil.asUintPtr()
+        sutil.setUint(uintptr , 0)
+
+        dagPath.numberOfShapesDirectlyBelow(uintptr)
+
+        return sutil.getUint(uintptr) > 0
 
     def findShadingGroup(self, dagPath):
-        dagPath.extendToShape()
-        fnDepNode = OpenMaya.MFnDependencyNode(dagPath.node())
 
-        instPlugArray = fnDepNode.findPlug("instObjGroups")
-        instPlugArrayElem = instPlugArray.elementByLogicalIndex(dagPath.instanceNumber())
+        if self.hasShapeBelow(dagPath):
+            dagPath.extendToShape()
+            fnDepNode = OpenMaya.MFnDependencyNode(dagPath.node())
 
-        if instPlugArrayElem.isConnected():
-            connectedPlugs = OpenMaya.MPlugArray()      
-            instPlugArrayElem.connectedTo(connectedPlugs, False, True)
+            instPlugArray = fnDepNode.findPlug("instObjGroups")
+            instPlugArrayElem = instPlugArray.elementByLogicalIndex(dagPath.instanceNumber())
 
-            if connectedPlugs.length() == 1:
-                sgNode = connectedPlugs[0].node()
+            if instPlugArrayElem.isConnected():
+                connectedPlugs = OpenMaya.MPlugArray()      
+                instPlugArrayElem.connectedTo(connectedPlugs, False, True)
 
-                if sgNode.hasFn(OpenMaya.MFn.kSet):
-                    return OpenMaya.MFnSet(sgNode)
+                if connectedPlugs.length() == 1:
+                    sgNode = connectedPlugs[0].node()
+
+                    if sgNode.hasFn(OpenMaya.MFn.kSet):
+                        return OpenMaya.MFnSet(sgNode)
 
         return None
         
     def doIt(self,argList):
-            
-        list = OpenMaya.MSelectionList()
-        OpenMaya.MGlobal.getActiveSelectionList(list)
+        
+        try:
+            list = OpenMaya.MSelectionList()
+            OpenMaya.MGlobal.getActiveSelectionList(list)
 
-        if list.length() == 2:
-            curveDagPath = OpenMaya.MDagPath()
-            list.getDagPath(0, curveDagPath)
-            curveDagPath.extendToShape()
+            if list.length() == 2:
+                curveDagPath = OpenMaya.MDagPath()
+                list.getDagPath(0, curveDagPath)
+                curveDagPath.extendToShape()
 
-            shapeDagPath = OpenMaya.MDagPath()
-            list.getDagPath(1, shapeDagPath)           
+                shapeDagPath = OpenMaya.MDagPath()
+                list.getDagPath(1, shapeDagPath)           
 
-            if(curveDagPath.node().hasFn(OpenMaya.MFn.kNurbsCurve)):
+                if(curveDagPath.node().hasFn(OpenMaya.MFn.kNurbsCurve)):
 
-                # We need the curve transform
-                curveTransformFn = OpenMaya.MFnDagNode(curveDagPath.transform())
-                curveTransformPlug = curveTransformFn.findPlug("message", True)
+                    # We need the curve transform
+                    curveTransformFn = OpenMaya.MFnDagNode(curveDagPath.transform())
+                    curveTransformPlug = curveTransformFn.findPlug("message", True)
 
-                # We need the shape's transform too
-                transformFn = OpenMaya.MFnDagNode(shapeDagPath.transform())
-                transformMessagePlug = transformFn.findPlug("message", True)
+                    # We need the shape's transform too
+                    transformFn = OpenMaya.MFnDagNode(shapeDagPath.transform())
+                    transformMessagePlug = transformFn.findPlug("message", True)
 
-                shadingGroupFn = self.findShadingGroup(shapeDagPath)
+                    shadingGroupFn = self.findShadingGroup(shapeDagPath)
 
-                # Create node first
-                mdagModifier = OpenMaya.MDagModifier()
-                self.mUndo.append(mdagModifier)
-                newNode = mdagModifier.createNode(kPluginNodeId)
-                mdagModifier.doIt()
+                    # Create node first
+                    mdagModifier = OpenMaya.MDagModifier()
+                    self.mUndo.append(mdagModifier)
+                    newNode = mdagModifier.createNode(kPluginNodeId)
+                    mdagModifier.doIt()
 
-                # Assign new correct name and select new locator
-                newNodeFn = OpenMaya.MFnDagNode(newNode)
-                newNodeFn.setName("instanceAlongCurveLocator#")
+                    # Assign new correct name and select new locator
+                    newNodeFn = OpenMaya.MFnDagNode(newNode)
+                    newNodeFn.setName("instanceAlongCurveLocator#")
 
-                # Get the node shape
-                nodeShapeDagPath = OpenMaya.MDagPath()
-                newNodeFn.getPath(nodeShapeDagPath)
-                nodeShapeDagPath.extendToShape()
-                newNodeFn = OpenMaya.MFnDagNode(nodeShapeDagPath)
+                    # Get the node shape
+                    nodeShapeDagPath = OpenMaya.MDagPath()
+                    newNodeFn.getPath(nodeShapeDagPath)
+                    nodeShapeDagPath.extendToShape()
+                    newNodeFn = OpenMaya.MFnDagNode(nodeShapeDagPath)
 
-                OpenMaya.MGlobal.clearSelectionList()
-                msel = OpenMaya.MSelectionList()
-                msel.add(nodeShapeDagPath)
-                OpenMaya.MGlobal.setActiveSelectionList(msel)
+                    OpenMaya.MGlobal.clearSelectionList()
+                    msel = OpenMaya.MSelectionList()
+                    msel.add(nodeShapeDagPath)
+                    OpenMaya.MGlobal.setActiveSelectionList(msel)
 
-                # Connect :D
-                mdgModifier = OpenMaya.MDGModifier()
-                self.mUndo.append(mdgModifier)               
-                mdgModifier.connect(curveTransformPlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr))
-                mdgModifier.connect(transformMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputTransformAttr))
+                    # Connect :D
+                    mdgModifier = OpenMaya.MDGModifier()
+                    self.mUndo.append(mdgModifier)               
+                    mdgModifier.connect(curveTransformPlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr))
+                    mdgModifier.connect(transformMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputTransformAttr))
 
-                if shadingGroupFn is not None:
-                    shadingGroupMessagePlug = shadingGroupFn.findPlug("message", True)
-                    mdgModifier.connect(shadingGroupMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputShadingGroupAttr))
+                    if shadingGroupFn is not None:
+                        shadingGroupMessagePlug = shadingGroupFn.findPlug("message", True)
+                        mdgModifier.connect(shadingGroupMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputShadingGroupAttr))
 
-                mdgModifier.doIt()
-                
+                    mdgModifier.doIt()
+                    
+                else:
+                    sys.stderr.write("Please select a curve first")
             else:
-                sys.stderr.write("Please select a curve first")
-        else:
-            sys.stderr.write("Please select a curve and a shape")
+                sys.stderr.write("Please select a curve and a shape")
+        except:
+            sys.stderr.write('Failed trying to create locator. stack trace: \n')
+            sys.stderr.write(traceback.format_exc())
 
     @staticmethod
     def cmdCreator():
