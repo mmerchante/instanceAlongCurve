@@ -13,6 +13,8 @@ kPluginNodeId = OpenMaya.MTypeId( 0x55555 )
 glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
+# TODO:
+#   - bake option?
 # Ideas:
 #   - orientation constraints: set a fixed axis?
 #   - twisting
@@ -92,7 +94,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         return outIndices
 
-
     def updateDrawingOverrides(self):
         knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.knownInstancesAttr)
         drawMode = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr).asInt()
@@ -101,7 +102,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         connections = OpenMaya.MPlugArray()
 
         for i in xrange(knownInstancesPlug.numConnectedElements()):
-
             knownPlugElement = knownInstancesPlug.elementByPhysicalIndex(i)
             knownPlugElement.connectedTo(connections, True, False)
             
@@ -119,19 +119,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         lodPlug = nodeFn.findPlug("overrideLevelOfDetail", False)
         lodPlug.setInt(useBBox)
 
-    def hasShapeBelow(self, dagPath):
-
-        sutil = OpenMaya.MScriptUtil()
-        uintptr = sutil.asUintPtr()
-        sutil.setUint(uintptr , 0)
-
-        dagPath.numberOfShapesDirectlyBelow(uintptr)
-
-        return uintptr > 0
+    def assignShadingGroup(self, fnSet, fnDagNode):
+        # Easiest, cleanest way is seems to be calling MEL.
+        # sets command handles everything, even nested instanced dag paths
+        mdgm = OpenMaya.MDGModifier()
+        mdgm.commandToExecute("sets -e -fe " + fnSet.name() + " " + fnDagNode.name())
+        mdgm.doIt()
 
     # Find original SG to reassign it to instance
     def getSG(self):
-
         inputSGPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputShadingGroupAttr)
         sgNode = self.getSingleSourceObjectFromPlug(inputSGPlug)
 
@@ -141,7 +137,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         return None
 
     def getSingleSourceObjectFromPlug(self, plug):
-
         if plug.isConnected():
 
             # Get connected input plugs
@@ -155,7 +150,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         return None
 
     def getInputTransformFn(self):
-
         inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
         transform = self.getSingleSourceObjectFromPlug(inputTransformPlug)
 
@@ -171,7 +165,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         return None
 
     def getCurveFn(self):
-
         inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
         curve = self.getSingleSourceObjectFromPlug(inputCurvePlug)
 
@@ -237,7 +230,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         # If the locator is being instanced, just stop updating its children.
         # This is to prevent losing references to the locator instances' children
-        # If you want to instance this locator, set everything 
+        # If you want to instance this locator, set everything before
         if OpenMaya.MFnDagNode(self.thisMObject()).isInstanced():
             return OpenMaya.kUnknownParameter
 
@@ -272,21 +265,22 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 instanceCount = expectedInstanceCount - knownInstancesPlug.numConnectedElements()
                 availableIndices = self.getAvailableLogicalIndices(knownInstancesPlug, instanceCount)
 
-                # Because this is not instanced, it will work
+                # Consider path for instances!
                 nodeFn = OpenMaya.MFnDagNode(path.transform())
 
                 # Instance as many times as necessary
                 for i in availableIndices:
                     
-                    # Instance transform and reassign SG
+                    # Instance transform
                     # InstanceLeaf must be set to False to prevent crashes :)
                     trInstance = transformFn.duplicate(True, False)
 
                     # Parent new instance
                     nodeFn.addChild(trInstance)
 
+                    # Recursively assign shading group
                     if shadingGroupFn is not None:
-                        shadingGroupFn.addMember(trInstance)
+                        self.assignShadingGroup(shadingGroupFn, OpenMaya.MFnDagNode(trInstance))
 
                     instanceFn = OpenMaya.MFnTransform(trInstance)
                     self.setDrawingOverride(instanceFn, drawMode, useBBox)
@@ -348,6 +342,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             # TODO: let the user decide forward axis?
             startOrientation = OpenMaya.MVector(0.0, 0.0, 1.0)
             curvePointIndex = 0
+
+            shadingGroupFn = self.getSG()
 
             for i in xrange(numConnectedElements):
 
@@ -476,8 +472,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         instanceAlongCurveLocator.knownInstancesAttr = msgAttributeFn.create("knownInstances", "ki")
         msgAttributeFn.setWritable( True )
-        msgAttributeFn.setStorable( True )    
-        msgAttributeFn.setHidden( True )  
+        msgAttributeFn.setStorable( True )
+        msgAttributeFn.setHidden( True )
         msgAttributeFn.setArray( True )  
         msgAttributeFn.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete) # Very important :)
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.knownInstancesAttr )
@@ -489,6 +485,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
+        nAttr.setKeyable( False )
+        nAttr.setChannelBox( True )
+        nAttr.setConnectable( False )
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.instanceCountAttr)
 
         ## Max instances when defined by instance length
@@ -498,6 +497,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
+        nAttr.setKeyable( False )
+        nAttr.setChannelBox( True )
+        nAttr.setConnectable( False )
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.maxInstancesByLengthAttr)
 
         # Length between instances
@@ -507,6 +509,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setWritable( True )
         nAttr.setStorable( True )
         nAttr.setHidden( False )
+        nAttr.setKeyable( False )
+        nAttr.setChannelBox( True )
+        nAttr.setConnectable( False )
         instanceAlongCurveLocator.addAttribute( instanceAlongCurveLocator.instanceLengthAttr)
         
         # Input curve transform
@@ -585,9 +590,7 @@ def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
         # Register command
-        # TODO: addmenuItem
         mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
-
         mplugin.addMenuItem("Instance Along Curve", "MayaWindow|mainEditMenu", kPluginCmdName, "")
 
         # Register AE template
@@ -699,6 +702,17 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
         return sutil.getUint(uintptr) > 0
 
     def findShadingGroup(self, dagPath):
+
+        # Search in children first before extending to shape
+        for child in xrange(dagPath.childCount()):
+            childDagPath = OpenMaya.MDagPath()
+            fnDagNode = OpenMaya.MFnDagNode(dagPath.child(child))
+            fnDagNode.getPath(childDagPath)
+
+            fnSet = self.findShadingGroup(childDagPath)
+
+            if fnSet is not None:
+                return fnSet
 
         if self.hasShapeBelow(dagPath):
             dagPath.extendToShape()
