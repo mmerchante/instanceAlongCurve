@@ -14,10 +14,6 @@ kPluginNodeId = OpenMaya.MTypeId( 0x55555 )
 glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
-# NEXT STEPS: 
-#   - Reintegrate old instancing logic with new arch
-#   - Convert all display parameters into array attributes
-
 # Ideas:
 #   - orientation constraints: set a fixed axis?
 #   - twisting
@@ -35,18 +31,18 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             self.y = OpenMaya.MObject()
             self.z = OpenMaya.MObject()
 
-    # Input attr
+    # Input attributes
     inputCurveAttr = OpenMaya.MObject()
     inputTransformAttr = OpenMaya.MObject()
     inputShadingGroupAttr = OpenMaya.MObject()
     inputTimeAttr = OpenMaya.MObject()
 
+    # Instance count related attributes
     instanceCountAttr = OpenMaya.MObject()
     instancingModeAttr = OpenMaya.MObject()
     instanceLengthAttr = OpenMaya.MObject()
     maxInstancesByLengthAttr = OpenMaya.MObject()
 
-    knownInstancesAttr = OpenMaya.MObject()
     displayTypeAttr = OpenMaya.MObject()
     bboxAttr = OpenMaya.MObject()
 
@@ -64,138 +60,111 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         OpenMaya.MFnDependencyNode(self.thisMObject()).setName("instanceAlongCurveLocatorShape#")
 
     # Helper function to get an array of available logical indices from the sparse array
-    # def getAvailableLogicalIndices(self, plug, numIndices):
+    def getAvailableLogicalIndices(self, plug, numIndices):
         
-    #     # Allocate and initialize
-    #     outIndices = OpenMaya.MIntArray(numIndices)
-    #     indices = OpenMaya.MIntArray(plug.numElements())
-    #     plug.getExistingArrayAttributeIndices(indices)
+        # Allocate and initialize
+        outIndices = OpenMaya.MIntArray(numIndices)
+        indices = OpenMaya.MIntArray(plug.numElements())
+        plug.getExistingArrayAttributeIndices(indices)
 
-    #     currentAvailableIndex = 0
-    #     indicesFound = 0
+        currentAvailableIndex = 0
+        indicesFound = 0
 
-    #     # Assuming indices are SORTED :)
-    #     for i in indices:
+        # Assuming indices are SORTED :)
+        for i in indices:
 
-    #         connectedPlug = plug.elementByLogicalIndex(i).isConnected()
+            connectedPlug = plug.elementByLogicalIndex(i).isConnected()
 
-    #         # Iteratively find available indices in the sparse array
-    #         while i > currentAvailableIndex:
-    #             outIndices[indicesFound] = currentAvailableIndex
-    #             indicesFound += 1
-    #             currentAvailableIndex += 1
+            # Iteratively find available indices in the sparse array
+            while i > currentAvailableIndex:
+                outIndices[indicesFound] = currentAvailableIndex
+                indicesFound += 1
+                currentAvailableIndex += 1
 
-    #         # Check against this index, add it if it is not connected
-    #         if i == currentAvailableIndex and not connectedPlug:
-    #             outIndices[indicesFound] = currentAvailableIndex
-    #             indicesFound += 1
+            # Check against this index, add it if it is not connected
+            if i == currentAvailableIndex and not connectedPlug:
+                outIndices[indicesFound] = currentAvailableIndex
+                indicesFound += 1
 
-    #         currentAvailableIndex += 1
+            currentAvailableIndex += 1
 
-    #         if indicesFound == numIndices:
-    #             return outIndices
+            if indicesFound == numIndices:
+                return outIndices
 
-    #     # Fill remaining expected indices
-    #     for i in xrange(indicesFound, numIndices):
-    #         outIndices[i] = currentAvailableIndex
-    #         currentAvailableIndex += 1
+        # Fill remaining expected indices
+        for i in xrange(indicesFound, numIndices):
+            outIndices[i] = currentAvailableIndex
+            currentAvailableIndex += 1
 
-    #     return outIndices
+        return outIndices
 
-    # def updateDrawingOverrides(self):
-    #     knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.knownInstancesAttr)
-    #     drawMode = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr).asInt()
-    #     useBBox = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.bboxAttr).asBool()
+    def assignShadingGroup(self, fnSet, fnDagNode):
+        # Easiest, cleanest way seems to be calling MEL.
+        # sets command handles everything, even nested instanced dag paths
+        mdgm = OpenMaya.MDGModifier()
+        mdgm.commandToExecute("sets -e -fe " + fnSet.name() + " " + fnDagNode.name())
+        mdgm.doIt()
 
-    #     connections = OpenMaya.MPlugArray()
+    # Find original SG to reassign it to instance
+    def getShadingGroup(self):
+        inputSGPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputShadingGroupAttr)
+        sgNode = self.getSingleSourceObjectFromPlug(inputSGPlug)
 
-    #     for i in xrange(knownInstancesPlug.numConnectedElements()):
-    #         knownPlugElement = knownInstancesPlug.elementByPhysicalIndex(i)
-    #         knownPlugElement.connectedTo(connections, True, False)
-            
-    #         for c in xrange(0, connections.length()):
-    #             instanceFn = OpenMaya.MFnTransform(connections[c].node())
-    #             self.setDrawingOverride(instanceFn, drawMode, useBBox)
+        if sgNode is not None and sgNode.hasFn(OpenMaya.MFn.kSet):
+            return OpenMaya.MFnSet(sgNode)
 
-    # def setDrawingOverride(self, nodeFn, drawMode, useBBox):
-    #     overrideEnabledPlug = nodeFn.findPlug("overrideEnabled", False)
-    #     overrideEnabledPlug.setBool(True)
+        return None
 
-    #     displayPlug = nodeFn.findPlug("overrideDisplayType", False)
-    #     displayPlug.setInt(drawMode)
+    def getSingleSourceObjectFromPlug(self, plug):
 
-    #     lodPlug = nodeFn.findPlug("overrideLevelOfDetail", False)
-    #     lodPlug.setInt(useBBox)
+        if plug.isConnected():
+            # Get connected input plugs
+            connections = OpenMaya.MPlugArray()
+            plug.connectedTo(connections, True, False)
 
-    # def assignShadingGroup(self, fnSet, fnDagNode):
-    #     # Easiest, cleanest way seems to be calling MEL.
-    #     # sets command handles everything, even nested instanced dag paths
-    #     mdgm = OpenMaya.MDGModifier()
-    #     mdgm.commandToExecute("sets -e -fe " + fnSet.name() + " " + fnDagNode.name())
-    #     mdgm.doIt()
+            # Find input transform
+            if connections.length() == 1:
+                return connections[0].node()
 
-    # # Find original SG to reassign it to instance
-    # def getSG(self):
-    #     inputSGPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputShadingGroupAttr)
-    #     sgNode = self.getSingleSourceObjectFromPlug(inputSGPlug)
+        return None
 
-    #     if sgNode is not None and sgNode.hasFn(OpenMaya.MFn.kSet):
-    #         return OpenMaya.MFnSet(sgNode)
+    def getInputTransformFn(self):
+        inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
+        transform = self.getSingleSourceObjectFromPlug(inputTransformPlug)
 
-    #     return None
+        # Get Fn from a DAG path to get the world transformations correctly
+        if transform is not None and transform.hasFn(OpenMaya.MFn.kTransform):
+                path = OpenMaya.MDagPath()
+                trFn = OpenMaya.MFnDagNode(transform)
+                trFn.getPath(path)
+                return OpenMaya.MFnTransform(path)
 
-    # def getSingleSourceObjectFromPlug(self, plug):
-    #     if plug.isConnected():
+        return None
 
-    #         # Get connected input plugs
-    #         connections = OpenMaya.MPlugArray()
-    #         plug.connectedTo(connections, True, False)
+    def getCurveFn(self):
+        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
+        curve = self.getSingleSourceObjectFromPlug(inputCurvePlug)
 
-    #         # Find input transform
-    #         if connections.length() == 1:
-    #             return connections[0].node()
+        # Get Fn from a DAG path to get the world transformations correctly
+        if curve is not None:
+            path = OpenMaya.MDagPath()
+            trFn = OpenMaya.MFnDagNode(curve)
+            trFn.getPath(path)
 
-    #     return None
+            path.extendToShape()
 
-    # def getInputTransformFn(self):
-    #     inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
-    #     transform = self.getSingleSourceObjectFromPlug(inputTransformPlug)
+            if path.node().hasFn(OpenMaya.MFn.kNurbsCurve):
+                return OpenMaya.MFnNurbsCurve(path)
 
-    #     if transform is not None and transform.hasFn(OpenMaya.MFn.kTransform):
-
-    #             # Get Fn from a DAG path to get the world transformations correctly
-    #             path = OpenMaya.MDagPath()
-    #             trFn = OpenMaya.MFnDagNode(transform)
-    #             trFn.getPath(path)
-
-    #             return OpenMaya.MFnTransform(path)
-
-    #     return None
-
-    # def getCurveFn(self):
-    #     inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
-    #     curve = self.getSingleSourceObjectFromPlug(inputCurvePlug)
-
-    #     if curve is not None:
-    #         # Get Fn from a DAG path to get the world transformations correctly
-    #         path = OpenMaya.MDagPath()
-    #         trFn = OpenMaya.MFnDagNode(curve)
-    #         trFn.getPath(path)
-
-    #         path.extendToShape()
-
-    #         if path.node().hasFn(OpenMaya.MFn.kNurbsCurve):
-    #             return OpenMaya.MFnNurbsCurve(path)
-
-    #     return None
+        return None
 
     def draw(self, view, path, style, status):
 
-        # try:
-        #     self.updateInstanceConnections(path)
-        # except:
-        #     sys.stderr.write('Failed trying to update locator. stack trace: \n')
-        #     sys.stderr.write(traceback.format_exc())
+        try:
+            self.updateInstanceConnections(path)
+        except:
+            sys.stderr.write('Failed trying to update locator. stack trace: \n')
+            sys.stderr.write(traceback.format_exc())
 
         # Draw simple locator lines
         view.beginGL()
@@ -213,118 +182,112 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
  
         view.endGL()
 
-    # # Calculate expected instances by the instancing mode
-    # def getInstanceCountByMode(self):
-    #     instancingModePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instancingModeAttr)
-    #     inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
+    # Calculate expected instances by the instancing mode
+    def getInstanceCountByMode(self):
+        instancingModePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instancingModeAttr)
+        inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
 
-    #     if inputCurvePlug.isConnected() and instancingModePlug.asInt() == 1:
-    #         instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceLengthAttr)
-    #         maxInstancesByLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.maxInstancesByLengthAttr)
-    #         curveFn = self.getCurveFn()
-    #         return min(maxInstancesByLengthPlug.asInt(), int(curveFn.length() / instanceLengthPlug.asFloat()))
+        if inputCurvePlug.isConnected() and instancingModePlug.asInt() == 1:
+            instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceLengthAttr)
+            maxInstancesByLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.maxInstancesByLengthAttr)
+            curveFn = self.getCurveFn()
+            return min(maxInstancesByLengthPlug.asInt(), int(curveFn.length() / instanceLengthPlug.asFloat()))
 
-    #     instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
-    #     return instanceCountPlug.asInt()
+        instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
+        return instanceCountPlug.asInt()
 
-    # def updateInstanceConnections(self, path):
+    def updateInstanceConnections(self, path):
 
-    #     # If the locator is being instanced, just stop updating its children.
-    #     # This is to prevent losing references to the locator instances' children
-    #     # If you want to instance this locator, set everything before
-    #     if OpenMaya.MFnDagNode(self.thisMObject()).isInstanced():
-    #         return OpenMaya.kUnknownParameter
+        # If the locator is being instanced, just stop updating its children.
+        # This is to prevent losing references to the locator instances' children
+        # If you want to change this locator, prepare the source before instantiating
+        if OpenMaya.MFnDagNode(self.thisMObject()).isInstanced():
+            return OpenMaya.kUnknownParameter
 
-    #     expectedInstanceCount = self.getInstanceCountByMode()
-    #     knownInstancesPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.knownInstancesAttr)
+        expectedInstanceCount = self.getInstanceCountByMode()
+        outputTranslationPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.outputTranslationAttr.compound)
+        outputRotationPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.outputRotationAttr.compound)    
+        numConnectedElements = outputTranslationPlug.numConnectedElements()
 
-    #     # Only instance if we are missing elements
-    #     if knownInstancesPlug.numConnectedElements() < expectedInstanceCount:
+        # Only instance if we are missing elements
+        # TODO: handle mismatches in translation/rotation plug connected elements (user deleted a plug? use connectionBroken method?)
+        if numConnectedElements < expectedInstanceCount:
 
-    #         inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
+            inputTransformFn = self.getInputTransformFn()
 
-    #         # Get connected input transform plugs 
-    #         inputTransformConnectedPlugs = OpenMaya.MPlugArray()
-    #         inputTransformPlug.connectedTo(inputTransformConnectedPlugs, True, False)
+            # Get shading group first
+            dagPath = OpenMaya.MDagPath()
+            inputTransformFn.getPath(dagPath)
+            shadingGroupFn = self.getShadingGroup()
 
-    #         # Find input transform
-    #         if inputTransformConnectedPlugs.length() == 1:
-    #             transform = inputTransformConnectedPlugs[0].node()
-    #             transformFn = OpenMaya.MFnTransform(transform)
+            instanceCount = expectedInstanceCount - numConnectedElements
+            availableIndices = self.getAvailableLogicalIndices(outputTranslationPlug, instanceCount)
 
-    #             drawMode = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr).asInt()
-    #             useBBox = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.bboxAttr).asBool()
+            # Consider path for instances!
+            nodeFn = OpenMaya.MFnDagNode(path.transform())
 
-    #             # Get shading group first
-    #             dagPath = OpenMaya.MDagPath()
-    #             transformFn.getPath(dagPath)
-    #             shadingGroupFn = self.getSG()
+            displayPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr)
+            LODPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.bboxAttr)
 
-
-    #             instanceCount = expectedInstanceCount - knownInstancesPlug.numConnectedElements()
-    #             availableIndices = self.getAvailableLogicalIndices(knownInstancesPlug, instanceCount)
-
-    #             # Note: knownInstances (TODO remove) indices MAY not be the same as the output matrix array
-    #             # For now, we are assuming the are both handling exactly the same
-    #             outputTransformationsArrayPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.outputMatricesArrayAttr)
-
-    #             # Consider path for instances!
-    #             nodeFn = OpenMaya.MFnDagNode(path.transform())
-
-    #             # Instance as many times as necessary
-    #             for i in availableIndices:
-                    
-    #                 # Instance transform
-    #                 # InstanceLeaf must be set to False to prevent crashes :)
-    #                 trInstance = transformFn.duplicate(True, False)
-
-    #                 # Parent new instance
-    #                 nodeFn.addChild(trInstance)
-
-    #                 # Recursively assign shading group
-    #                 if shadingGroupFn is not None:
-    #                     self.assignShadingGroup(shadingGroupFn, OpenMaya.MFnDagNode(trInstance))
-
-    #                 instanceFn = OpenMaya.MFnTransform(trInstance)
-    #                 self.setDrawingOverride(instanceFn, drawMode, useBBox)
-
-    #                 instObjGroupsAttr = instanceFn.attribute('message')
-    #                 instPlugArray = OpenMaya.MPlug(trInstance, instObjGroupsAttr)
-
-    #                 instTransformationAttr = instanceFn.attribute('worldMatrix')
-    #                 instTransformationPlug = OpenMaya.MPlug(trInstance, instTransformationAttr)
-    #                 instTransformationPlugElement = instTransformationPlug.elementByLogicalIndex(5)
-                    
-    #                 knownInstancesPlugElement = knownInstancesPlug.elementByLogicalIndex(i)
-    #                 outputTransformationPlugElement = outputTransformationsArrayPlug.elementByLogicalIndex(i)
-
-    #                 mdgModifier = OpenMaya.MDagModifier()
-    #                 # mdgModifier.connect(instPlugArray, knownInstancesPlugElement)
-    #                 mdgModifier.connect(outputTransformationPlugElement, instTransformationPlugElement)
-    #                 mdgModifier.doIt()
-
-    #     # Remove instances if necessary
-    #     elif knownInstancesPlug.numConnectedElements() > expectedInstanceCount:
-
-    #         mdgModifier = OpenMaya.MDGModifier()
-    #         connections = OpenMaya.MPlugArray()
-            
-    #         numConnectedElements = knownInstancesPlug.numConnectedElements()
-    #         toRemove = knownInstancesPlug.numConnectedElements() - expectedInstanceCount
-
-    #         for i in xrange(toRemove):
-
-    #             knownPlugElement = knownInstancesPlug.connectionByPhysicalIndex(numConnectedElements - 1 - i)
-    #             knownPlugElement.connectedTo(connections, True, False)
+            # Instance as many times as necessary
+            for i in availableIndices:
                 
-    #             for c in xrange(connections.length()):
-    #                 node = connections[c].node()
-    #                 mdgModifier.disconnect(connections[c], knownPlugElement)
-    #                 mdgModifier.deleteNode(node)
+                # Instance transform
+                # InstanceLeaf must be set to False to prevent crashes :)
+                trInstance = inputTransformFn.duplicate(True, False)
+                instanceFn = OpenMaya.MFnTransform(trInstance)
 
-    #         mdgModifier.doIt()
+                # Parent new instance
+                nodeFn.addChild(trInstance)
 
-    #     return OpenMaya.kUnknownParameter
+                # Recursively assign shading group
+                if shadingGroupFn is not None:
+                    self.assignShadingGroup(shadingGroupFn, OpenMaya.MFnDagNode(trInstance))
+
+                instanceTranslatePlug = instanceFn.findPlug('translate', False)
+                outputTranslationPlugElement = outputTranslationPlug.elementByLogicalIndex(i)
+
+                instanceRotationPlug = instanceFn.findPlug('rotate', False)
+                outputRotationPlugElement = outputRotationPlug.elementByLogicalIndex(i)
+
+                # Enable drawing overrides
+                overrideEnabledPlug = instanceFn.findPlug("overrideEnabled", False)
+                overrideEnabledPlug.setBool(True)
+
+                instanceDisplayPlug = instanceFn.findPlug("overrideDisplayType", False)
+                instanceLODPlug = instanceFn.findPlug("overrideLevelOfDetail", False)
+
+                mdgModifier = OpenMaya.MDagModifier()
+
+                if not outputTranslationPlugElement.isConnected():
+                    mdgModifier.connect(outputTranslationPlugElement, instanceTranslatePlug)
+
+                if not outputRotationPlugElement.isConnected():
+                    mdgModifier.connect(outputRotationPlugElement, instanceRotationPlug)
+
+                if not instanceDisplayPlug.isConnected():
+                    mdgModifier.connect(displayPlug, instanceDisplayPlug)
+
+                if not instanceLODPlug.isConnected():
+                    mdgModifier.connect(LODPlug, instanceLODPlug)
+
+                mdgModifier.doIt()
+
+        # Remove instances if necessary
+        elif numConnectedElements > expectedInstanceCount:
+
+            mdgModifier = OpenMaya.MDGModifier()
+            connections = OpenMaya.MPlugArray()        
+            toRemove = numConnectedElements - expectedInstanceCount
+
+            for i in xrange(toRemove):
+                outputTranslationPlugElement = outputTranslationPlug.connectionByPhysicalIndex(numConnectedElements - 1 - i)
+                outputTranslationPlugElement.connectedTo(connections, False, True)
+                
+                for c in xrange(connections.length()):
+                    mdgModifier.deleteNode(connections[c].node())
+
+            mdgModifier.doIt()
 
     # def updateInstancePositions(self):
 
@@ -386,47 +349,53 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     #                 instanceFn.setTranslation(OpenMaya.MVector(point), OpenMaya.MSpace.kWorld)
     #                 instanceFn.setRotation(rot, OpenMaya.MSpace.kWorld)
 
+    def updateInstancePositions(self, curveFn, dataBlock, count):
 
-    def updateInstancePositions(self, curveFn, dataBlock):
             point = OpenMaya.MPoint()
             curveLength = curveFn.length()
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
 
-            for i in xrange(translateArrayHandle.elementCount()):
-                param = curveFn.findParamFromLength(curveLength * (i / float(translateArrayHandle.elementCount())))
-                curveFn.getPointAtParam(param, point)
+            # Take advantage of sorted, incremental logical indices
+            if translateArrayHandle.elementCount() > 0:
+                for i in xrange(count):
+                    param = curveFn.findParamFromLength(curveLength * (i / float(count)))
+                    curveFn.getPointAtParam(param, point)
 
-                translateHandle = translateArrayHandle.outputValue()
-                translateHandle.set3Float(point.x, point.y, point.z)
+                    translateHandle = translateArrayHandle.outputValue()
+                    translateHandle.set3Double(point.x, point.y, point.z)
 
-                if i < translateArrayHandle.elementCount() - 1:
-                    translateArrayHandle.next()
+                    if i < translateArrayHandle.elementCount() - 1:
+                        translateArrayHandle.next()
 
             translateArrayHandle.setAllClean()
 
-    def updateInstanceRotations(self, curveFn, dataBlock):
+    def updateInstanceRotations(self, curveFn, dataBlock, count):
             point = OpenMaya.MPoint()
             curveLength = curveFn.length()
             rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
-
             startOrientation = OpenMaya.MVector(0.0, 0.0, 1.0)
 
-            for i in xrange(rotationArrayHandle.elementCount()):
+            if rotationArrayHandle.elementCount() > 0:
+                for i in xrange(count):
 
-                param = curveFn.findParamFromLength(curveLength * (i / float(rotationArrayHandle.elementCount())))
-                tangent = curveFn.tangent(param)
-                rot = startOrientation.rotateTo(tangent).asEulerRotation().asVector()
+                    param = curveFn.findParamFromLength(curveLength * (i / float(count)))
+                    tangent = curveFn.tangent(param)
+                    rot = startOrientation.rotateTo(tangent).asEulerRotation().asVector()
 
-                rotationHandle = rotationArrayHandle.outputValue()
-                rotationHandle.set3Float(rot.x, rot.y, rot.z)
+                    rotationHandle = rotationArrayHandle.outputValue()
+                    rotationHandle.set3Double(rot.x, rot.y, rot.z)
 
-                if i < rotationArrayHandle.elementCount() - 1:
-                    rotationArrayHandle.next()
+                    if i < rotationArrayHandle.elementCount() - 1:
+                        rotationArrayHandle.next()
 
             rotationArrayHandle.setAllClean()
 
-    def compute(self, plug, dataBlock):
+    # def legalDisconnection(self, plug, otherPlug, asSrc, isLegal):
+    #     print("DISCONNECTION?")
+    #     isLegal = True
+    #     # isLegal = self.canDisconnect
 
+    def compute(self, plug, dataBlock):
         try:
             timeDataHandle = dataBlock.inputValue( instanceAlongCurveLocator.inputTimeAttr )
             time = timeDataHandle.asTime().value()
@@ -436,10 +405,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             print "Computing! " + plug.info()
 
-            self.updateInstancePositions(curveFn, dataBlock)
-            self.updateInstanceRotations(curveFn, dataBlock)
+            instanceCount = self.getInstanceCountByMode()
 
-            dataBlock.setClean(plug)
+            self.updateInstancePositions(curveFn, dataBlock, instanceCount)
+            self.updateInstanceRotations(curveFn, dataBlock, instanceCount)
 
         except:
             sys.stderr.write('Failed trying to compute locator. stack trace: \n')
@@ -451,20 +420,21 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         return OpenMayaMPx.asMPxPtr( instanceAlongCurveLocator() )
 
     @classmethod
-    def addCompoundVector3Attribute(cls, compoundAttribute, attributeName):
+    def addCompoundVector3Attribute(cls, compoundAttribute, attributeName, unitType):
 
+        unitAttr = OpenMaya.MFnUnitAttribute()
         nAttr = OpenMaya.MFnNumericAttribute()
 
-        compoundAttribute.x = nAttr.create(attributeName + "X", attributeName + "X", OpenMaya.MFnNumericData.kFloat)    
-        nAttr.setWritable( False )
+        compoundAttribute.x = unitAttr.create(attributeName + "X", attributeName + "X", unitType)
+        unitAttr.setWritable( False )
         cls.addAttribute(compoundAttribute.x)
 
-        compoundAttribute.y = nAttr.create(attributeName + "Y", attributeName + "Y", OpenMaya.MFnNumericData.kFloat)
-        nAttr.setWritable( False )
+        compoundAttribute.y = unitAttr.create(attributeName + "Y", attributeName + "Y", unitType)
+        unitAttr.setWritable( False )
         cls.addAttribute(compoundAttribute.y)
 
-        compoundAttribute.z = nAttr.create(attributeName + "Z", attributeName + "Z", OpenMaya.MFnNumericData.kFloat)
-        nAttr.setWritable( False )
+        compoundAttribute.z = unitAttr.create(attributeName + "Z", attributeName + "Z", unitType)
+        unitAttr.setWritable( False )
         cls.addAttribute(compoundAttribute.z)
 
         # Output compound
@@ -473,6 +443,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setWritable( False )
         nAttr.setArray( True )
         nAttr.setUsesArrayDataBuilder( True )
+        nAttr.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete)
         cls.addAttribute(compoundAttribute.compound)
 
     @staticmethod
@@ -493,11 +464,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         node.inputShadingGroupAttr = msgAttributeFn.create("inputShadingGroup", "iSG")    
         node.addAttribute( node.inputShadingGroupAttr )
-
-        node.knownInstancesAttr = msgAttributeFn.create("knownInstances", "ki")    
-        msgAttributeFn.setArray( True )  
-        msgAttributeFn.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete) # Very important :)
-        node.addAttribute( node.knownInstancesAttr )
 
         # Input time
         node.inputTimeAttr = timeFn.create("inputTime", "inputTime", OpenMaya.MFnUnitAttribute.kTime)
@@ -554,19 +520,29 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         enumFn.setDefault("Tangent")
         node.addAttribute( node.orientationModeAttr )
 
-        node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean, False)
+        node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean)
         node.addAttribute( node.bboxAttr )
 
         # Output attributes
-        node.addCompoundVector3Attribute(node.outputTranslationAttr, "outputTranslation")        
-        node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation")
+        node.addCompoundVector3Attribute(node.outputTranslationAttr, "outputTranslation", OpenMaya.MFnUnitAttribute.kDistance)
+        node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle)
         # node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale")
 
         node.attributeAffects( node.inputTimeAttr, node.outputTranslationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputTranslationAttr.compound )
+        node.attributeAffects( node.instanceCountAttr, node.outputTranslationAttr.compound)
+        node.attributeAffects( node.instanceLengthAttr, node.outputTranslationAttr.compound)
+        node.attributeAffects( node.instancingModeAttr, node.outputTranslationAttr.compound)
+        node.attributeAffects( node.maxInstancesByLengthAttr, node.outputTranslationAttr.compound)
 
         node.attributeAffects( node.inputTimeAttr, node.outputRotationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputRotationAttr.compound )
+        node.attributeAffects( node.instanceCountAttr, node.outputRotationAttr.compound)
+        node.attributeAffects( node.instanceLengthAttr, node.outputRotationAttr.compound)
+        node.attributeAffects( node.instancingModeAttr, node.outputRotationAttr.compound)
+        node.attributeAffects( node.maxInstancesByLengthAttr, node.outputRotationAttr.compound)
+        node.attributeAffects( node.orientationModeAttr, node.outputRotationAttr.compound)
+
 
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
@@ -574,11 +550,11 @@ def initializePlugin( mobject ):
         # Register command
         # mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
 
-        # if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
+        if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
         #     mplugin.addMenuItem("Instance Along Curve", "MayaWindow|mainEditMenu", kPluginCmdName, "")
 
             # Register AE template
-            # pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
+            pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
 
         # Register node
         mplugin.registerNode( kPluginNodeName, kPluginNodeId, instanceAlongCurveLocator.nodeCreator,
@@ -597,61 +573,61 @@ def uninitializePlugin( mobject ):
         sys.stderr.write( 'Failed to deregister plugin instanceAlongCurve')
         raise
 
-# ###############
-# # AE TEMPLATE #
-# ###############
-# def loadAETemplateCallback(nodeName):
-#     AEinstanceAlongCurveLocatorTemplate(nodeName)
+###############
+# AE TEMPLATE #
+###############
+def loadAETemplateCallback(nodeName):
+    AEinstanceAlongCurveLocatorTemplate(nodeName)
 
-# class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
+class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
-#     def addControl(self, control, label=None, **kwargs):
-#         pm.ui.AETemplate.addControl(self, control, label=label, **kwargs)
+    def addControl(self, control, label=None, **kwargs):
+        pm.ui.AETemplate.addControl(self, control, label=label, **kwargs)
 
-#     def beginLayout(self, name, collapse=True):
-#         pm.ui.AETemplate.beginLayout(self, name, collapse=collapse)
+    def beginLayout(self, name, collapse=True):
+        pm.ui.AETemplate.beginLayout(self, name, collapse=collapse)
 
-#     def __init__(self, nodeName):
-#         pm.ui.AETemplate.__init__(self,nodeName)
-#         self.thisNode = None
-#         self.node = pm.PyNode(self.nodeName)
+    def __init__(self, nodeName):
+        pm.ui.AETemplate.__init__(self,nodeName)
+        self.thisNode = None
+        self.node = pm.PyNode(self.nodeName)
 
-#         if self.node.type() == kPluginNodeName:
-#             self.beginScrollLayout()
-#             self.beginLayout("Instance Along Curve Settings" ,collapse=0)
+        if self.node.type() == kPluginNodeName:
+            self.beginScrollLayout()
+            self.beginLayout("Instance Along Curve Settings" ,collapse=0)
 
-#             self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
-#             self.addControl("instanceCount", label="Count")
-#             self.addControl("instanceLength", label="Distance")
-#             self.addControl("maxInstancesByLength", label="Max Instances")
+            self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
+            self.addControl("instanceCount", label="Count")
+            self.addControl("instanceLength", label="Distance")
+            self.addControl("maxInstancesByLength", label="Max Instances")
             
-#             self.addSeparator()
+            self.addSeparator()
 
-#             self.addControl("orientationMode", label="Orientation Mode")
+            self.addControl("orientationMode", label="Orientation Mode")
 
-#             self.addSeparator()
+            self.addSeparator()
             
-#             self.addControl("instanceDisplayType", label="Instance Display Type")
-#             self.addControl("instanceBoundingBox", label="Use bounding box")
+            self.addControl("instanceDisplayType", label="Instance Display Type")
+            self.addControl("instanceBoundingBox", label="Use bounding box")
             
-#             self.addSeparator()
+            self.addSeparator()
             
-#             self.addControl("inputCurve", label="Input curve")
-#             self.addControl("inputTransform", label="Input object")
-#             self.addControl("inputShadingGroup", label="Shading Group")
-#             self.addExtraControls()
+            self.addControl("inputCurve", label="Input curve")
+            self.addControl("inputTransform", label="Input object")
+            self.addControl("inputShadingGroup", label="Shading Group")
+            self.addExtraControls()
 
-#             self.endLayout()
-#             self.endScrollLayout()
+            self.endLayout()
+            self.endScrollLayout()
 
-#     def onInstanceModeChanged(self, nodeName):
-#         if pm.PyNode(nodeName).type() == kPluginNodeName:
-#             nodeAttr = pm.PyNode(nodeName + ".instancingMode")
-#             mode = nodeAttr.get("instancingMode")
-#             self.dimControl(nodeName, "instanceLength", mode == 0)
-#             self.dimControl(nodeName, "maxInstancesByLength", mode == 0)
-#             self.dimControl(nodeName, "instanceCount", mode == 1)
-#             # TODO: dim everything if there is no curve or transform
+    def onInstanceModeChanged(self, nodeName):
+        if pm.PyNode(nodeName).type() == kPluginNodeName:
+            nodeAttr = pm.PyNode(nodeName + ".instancingMode")
+            mode = nodeAttr.get("instancingMode")
+            self.dimControl(nodeName, "instanceLength", mode == 0)
+            self.dimControl(nodeName, "maxInstancesByLength", mode == 0)
+            self.dimControl(nodeName, "instanceCount", mode == 1)
+            # TODO: dim everything if there is no curve or transform
 
 # # Command
 # class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
