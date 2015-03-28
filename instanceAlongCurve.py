@@ -230,6 +230,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 displayPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr)
                 LODPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.bboxAttr)
 
+                mdgModifier = OpenMaya.MDagModifier()
+
                 # Instance as many times as necessary
                 for i in availableIndices:
                     
@@ -258,8 +260,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                     instanceDisplayPlug = instanceFn.findPlug("overrideDisplayType", False)
                     instanceLODPlug = instanceFn.findPlug("overrideLevelOfDetail", False)
 
-                    mdgModifier = OpenMaya.MDagModifier()
-
                     if not outputTranslationPlugElement.isConnected():
                         mdgModifier.connect(outputTranslationPlugElement, instanceTranslatePlug)
 
@@ -272,7 +272,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                     if not instanceLODPlug.isConnected():
                         mdgModifier.connect(LODPlug, instanceLODPlug)
 
-                    mdgModifier.doIt()
+                mdgModifier.doIt()
 
         # Remove instances if necessary
         elif numConnectedElements > expectedInstanceCount:
@@ -296,19 +296,18 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             curveLength = curveFn.length()
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
 
-            # Take advantage of sorted, incremental logical indices
-            if translateArrayHandle.elementCount() > 0:
-                for i in xrange(count):
-                    param = curveFn.findParamFromLength(curveLength * (i / float(count)))
-                    curveFn.getPointAtParam(param, point)
+            # Make sure there are enough handles...
+            for i in xrange(min(count, translateArrayHandle.elementCount())):
 
-                    translateHandle = translateArrayHandle.outputValue()
-                    translateHandle.set3Double(point.x, point.y, point.z)
+                param = curveFn.findParamFromLength(curveLength * (i / float(count)))
+                curveFn.getPointAtParam(param, point)
 
-                    if i < translateArrayHandle.elementCount() - 1:
-                        translateArrayHandle.next()
+                translateArrayHandle.jumpToArrayElement(i)
+                translateHandle = translateArrayHandle.outputValue()
+                translateHandle.set3Double(point.x, point.y, point.z)
 
             translateArrayHandle.setAllClean()
+            translateArrayHandle.setClean()
 
     def updateInstanceRotations(self, curveFn, dataBlock, count):
             point = OpenMaya.MPoint()
@@ -324,29 +323,28 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             if inputTransformPlug.isConnected():
                 self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
 
-            if rotationArrayHandle.elementCount() > 0:
-                for i in xrange(count):
-                    param = curveFn.findParamFromLength(curveLength * (i / float(count)))
-                    rot = OpenMaya.MQuaternion()
+            for i in xrange(min(count, rotationArrayHandle.elementCount())):
 
-                    if rotMode == 1:
-                        rot = inputTransformRotation; # No realtime preview - use an inputRotation for that?
-                    elif rotMode == 2:
-                        normal = curveFn.normal(param)
-                        rot = startOrientation.rotateTo(normal)
-                    elif rotMode == 3:
-                        tangent = curveFn.tangent(param)
-                        rot = startOrientation.rotateTo(tangent)
+                param = curveFn.findParamFromLength(curveLength * (i / float(count)))
+                rot = OpenMaya.MQuaternion()
 
-                    rot = rot.asEulerRotation().asVector()
+                if rotMode == 1:
+                    rot = inputTransformRotation; # No realtime preview - use an inputRotation for that?
+                elif rotMode == 2:
+                    normal = curveFn.normal(param)
+                    rot = startOrientation.rotateTo(normal)
+                elif rotMode == 3:
+                    tangent = curveFn.tangent(param)
+                    rot = startOrientation.rotateTo(tangent)
 
-                    rotationHandle = rotationArrayHandle.outputValue()
-                    rotationHandle.set3Double(rot.x, rot.y, rot.z)
+                rot = rot.asEulerRotation().asVector()
 
-                    if i < rotationArrayHandle.elementCount() - 1:
-                        rotationArrayHandle.next()
+                rotationArrayHandle.jumpToArrayElement(i)
+                rotationHandle = rotationArrayHandle.outputValue()
+                rotationHandle.set3Double(rot.x, rot.y, rot.z)
 
             rotationArrayHandle.setAllClean()
+            rotationArrayHandle.setClean()
 
     # TODO: investigate this
     # def legalDisconnection(self, plug, otherPlug, asSrc, isLegal):
@@ -363,12 +361,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             if not curve.isNull():
                 curveFn = OpenMaya.MFnNurbsCurve(curve)
 
-                print "Computing! " + plug.info()
+                # print "Computing! " + plug.info()
 
                 instanceCount = self.getInstanceCountByMode()
 
-                self.updateInstancePositions(curveFn, dataBlock, instanceCount)
-                self.updateInstanceRotations(curveFn, dataBlock, instanceCount)
+                if plug == instanceAlongCurveLocator.outputTranslationAttr.compound:
+                    self.updateInstancePositions(curveFn, dataBlock, instanceCount)
+
+                if plug == instanceAlongCurveLocator.outputRotationAttr.compound:
+                    self.updateInstanceRotations(curveFn, dataBlock, instanceCount)
 
         except:
             sys.stderr.write('Failed trying to compute locator. stack trace: \n')
