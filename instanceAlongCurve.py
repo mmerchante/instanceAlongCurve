@@ -15,9 +15,10 @@ glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
 # Ideas:
+#   - Randomize position (/w radius), rotation (/w ampltiude)
+#   - Random meshes
 #   - New orientation mode: time warping on input transform. A nice domino effect can be done this way
-#   - orientation constraints: set a fixed axis?
-#   - modulate attributes (pos, rot, scale) along curve's parameter space through user defined curves
+#   - Modulate attributes (pos, rot, scale) along curve's parameter space through user defined curves
 
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
@@ -46,6 +47,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     bboxAttr = OpenMaya.MObject()
 
     orientationModeAttr = OpenMaya.MObject()
+
+    inputOrientationAxisAttr = Vector3CompoundAttribute()
 
     # Output vectors
     outputTranslationAttr = Vector3CompoundAttribute()
@@ -313,7 +316,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             point = OpenMaya.MPoint()
             curveLength = curveFn.length()
             rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
-            startOrientation = OpenMaya.MVector(0.0, 0.0, 1.0)
+            startOrientation = dataBlock.outputValue(instanceAlongCurveLocator.inputOrientationAxisAttr.compound).asVector().normal()
 
             rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()
 
@@ -336,6 +339,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 elif rotMode == 3:
                     tangent = curveFn.tangent(param)
                     rot = startOrientation.rotateTo(tangent)
+                elif rotMode == 4:
+                    tangent = curveFn.tangent(param)
+                    rot = startOrientation.rotateTo(tangent)
+                    
+                    if i % 2 == 1:
+                        rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
 
                 rot = rot.asEulerRotation().asVector()
 
@@ -381,29 +390,29 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         return OpenMayaMPx.asMPxPtr( instanceAlongCurveLocator() )
 
     @classmethod
-    def addCompoundVector3Attribute(cls, compoundAttribute, attributeName, unitType):
+    def addCompoundVector3Attribute(cls, compoundAttribute, attributeName, unitType, arrayAttr, inputAttr, defaultValue):
 
         unitAttr = OpenMaya.MFnUnitAttribute()
         nAttr = OpenMaya.MFnNumericAttribute()
 
-        compoundAttribute.x = unitAttr.create(attributeName + "X", attributeName + "X", unitType)
-        unitAttr.setWritable( False )
+        compoundAttribute.x = unitAttr.create(attributeName + "X", attributeName + "X", unitType, defaultValue.x)
+        unitAttr.setWritable( inputAttr )
         cls.addAttribute(compoundAttribute.x)
 
-        compoundAttribute.y = unitAttr.create(attributeName + "Y", attributeName + "Y", unitType)
-        unitAttr.setWritable( False )
+        compoundAttribute.y = unitAttr.create(attributeName + "Y", attributeName + "Y", unitType, defaultValue.y)
+        unitAttr.setWritable( inputAttr )
         cls.addAttribute(compoundAttribute.y)
 
-        compoundAttribute.z = unitAttr.create(attributeName + "Z", attributeName + "Z", unitType)
-        unitAttr.setWritable( False )
+        compoundAttribute.z = unitAttr.create(attributeName + "Z", attributeName + "Z", unitType, defaultValue.z)
+        unitAttr.setWritable( inputAttr )
         cls.addAttribute(compoundAttribute.z)
 
         # Output compound
         compoundAttribute.compound = nAttr.create(attributeName, attributeName,
                                      compoundAttribute.x, compoundAttribute.y, compoundAttribute.z)
-        nAttr.setWritable( False )
-        nAttr.setArray( True )
-        nAttr.setUsesArrayDataBuilder( True )
+        nAttr.setWritable( inputAttr )
+        nAttr.setArray( arrayAttr )
+        nAttr.setUsesArrayDataBuilder( arrayAttr )
         nAttr.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete)
         cls.addAttribute(compoundAttribute.compound)
 
@@ -478,15 +487,18 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         enumFn.addField( "Copy from Source", 1 );
         enumFn.addField( "Normal", 2 );
         enumFn.addField( "Tangent", 3 );
+        enumFn.addField( "Chain", 4 );
         enumFn.setDefault("Tangent")
         node.addAttribute( node.orientationModeAttr )
+
+        node.addCompoundVector3Attribute(node.inputOrientationAxisAttr, "inputOrientationAxis", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 1.0))
 
         node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean)
         node.addAttribute( node.bboxAttr )
 
         # Output attributes
-        node.addCompoundVector3Attribute(node.outputTranslationAttr, "outputTranslation", OpenMaya.MFnUnitAttribute.kDistance)
-        node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle)
+        node.addCompoundVector3Attribute(node.outputTranslationAttr, "outputTranslation", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
+        node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         # node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale")
 
         node.attributeAffects( node.inputTimeAttr, node.outputTranslationAttr.compound )
@@ -504,6 +516,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.orientationModeAttr, node.outputRotationAttr.compound)
 
+        node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
 
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
@@ -565,6 +578,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.addSeparator()
 
             self.addControl("orientationMode", label="Orientation Mode")
+            self.addControl("inputOrientationAxis", label="Orientation Axis")
 
             self.addSeparator()
             
