@@ -1,6 +1,7 @@
 import sys
 import pdb
 import traceback
+import random
 import pymel.core as pm
 import maya.OpenMayaMPx as OpenMayaMPx
 import maya.OpenMaya as OpenMaya
@@ -47,8 +48,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     bboxAttr = OpenMaya.MObject()
 
     orientationModeAttr = OpenMaya.MObject()
-
     inputOrientationAxisAttr = Vector3CompoundAttribute()
+    
+    inputPositionRandomnessAttr = OpenMaya.MObject()
+    inputRotationRandomnessAttr = OpenMaya.MObject()
 
     # Output vectors
     outputTranslationAttr = Vector3CompoundAttribute()
@@ -299,11 +302,20 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             curveLength = curveFn.length()
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
 
+            randomRadius = dataBlock.outputValue(instanceAlongCurveLocator.inputPositionRandomnessAttr).asFloat()
+
+            # Deterministic random
+            random.seed(count)
+
             # Make sure there are enough handles...
             for i in xrange(min(count, translateArrayHandle.elementCount())):
 
                 param = curveFn.findParamFromLength(curveLength * (i / float(count)))
                 curveFn.getPointAtParam(param, point)
+
+                point.x += (random.random() * 2.0 - 1.0) * randomRadius
+                point.y += (random.random() * 2.0 - 1.0) * randomRadius
+                point.z += (random.random() * 2.0 - 1.0) * randomRadius
 
                 translateArrayHandle.jumpToArrayElement(i)
                 translateHandle = translateArrayHandle.outputValue()
@@ -317,6 +329,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             curveLength = curveFn.length()
             rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
             startOrientation = dataBlock.outputValue(instanceAlongCurveLocator.inputOrientationAxisAttr.compound).asVector().normal()
+
+            randomRadius = dataBlock.outputValue(instanceAlongCurveLocator.inputRotationRandomnessAttr).asFloat()
+            randomRadius *= 3.141592 / 180.0
+
+            # Deterministic random
+            random.seed(count)
 
             rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()
 
@@ -347,6 +365,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                         rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
 
                 rot = rot.asEulerRotation().asVector()
+
+                rot.x += (random.random() * 2.0 - 1.0) * randomRadius
+                rot.y += (random.random() * 2.0 - 1.0) * randomRadius
+                rot.z += (random.random() * 2.0 - 1.0) * randomRadius
 
                 rotationArrayHandle.jumpToArrayElement(i)
                 rotationHandle = rotationArrayHandle.outputValue()
@@ -467,6 +489,18 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setConnectable( False )
         node.addAttribute( node.instanceLengthAttr)
 
+        node.inputPositionRandomnessAttr = nAttr.create("inputPositionRandomness", "inputPositionRandomness", OpenMaya.MFnNumericData.kFloat, 0.0)
+        nAttr.setMin(0.0)
+        nAttr.setSoftMax(1.0)
+        nAttr.setKeyable( True )
+        node.addAttribute( node.inputPositionRandomnessAttr )
+
+        node.inputRotationRandomnessAttr = nAttr.create("inputRotationRandomness", "inputRotationRandomness", OpenMaya.MFnNumericData.kFloat, 0.0)
+        nAttr.setMin(0.0)
+        nAttr.setSoftMax(90.0)
+        nAttr.setKeyable( True )
+        node.addAttribute( node.inputRotationRandomnessAttr )
+
         # Display override options
         node.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
         enumFn.addField( "Normal", 0 );
@@ -507,6 +541,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instanceLengthAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.instancingModeAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputTranslationAttr.compound)
+        node.attributeAffects( node.inputPositionRandomnessAttr, node.outputTranslationAttr.compound)
 
         node.attributeAffects( node.inputTimeAttr, node.outputRotationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputRotationAttr.compound )
@@ -515,6 +550,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instancingModeAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.orientationModeAttr, node.outputRotationAttr.compound)
+        node.attributeAffects( node.inputRotationRandomnessAttr, node.outputRotationAttr.compound)
 
         node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
 
@@ -579,6 +615,11 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
             self.addControl("orientationMode", label="Orientation Mode")
             self.addControl("inputOrientationAxis", label="Orientation Axis")
+
+            self.addSeparator()
+
+            self.addControl("inputPositionRandomness", label="Position random")
+            self.addControl("inputRotationRandomness", label="Rotation random (angle)")
 
             self.addSeparator()
             
