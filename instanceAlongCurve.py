@@ -1,10 +1,11 @@
 import sys
 import pdb
-import traceback
 import random
+import traceback
+import maya.mel as mel
 import pymel.core as pm
-import maya.OpenMayaMPx as OpenMayaMPx
 import maya.OpenMaya as OpenMaya
+import maya.OpenMayaMPx as OpenMayaMPx
 import maya.OpenMayaRender as OpenMayaRender
 
 kPluginCmdName = "instanceAlongCurve"
@@ -16,10 +17,11 @@ glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
 # Ideas:
-#   - Randomize position (/w radius), rotation (/w ampltiude)
+#   - New orientation mode: follow last position. This is cool for random position or position ramp cases
 #   - Random meshes
 #   - New orientation mode: time warping on input transform. A nice domino effect can be done this way
 #   - Modulate attributes (pos, rot, scale) along curve's parameter space through user defined curves
+#   - Add time phase on ramped attributes :)
 
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
@@ -52,6 +54,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     
     inputPositionRandomnessAttr = OpenMaya.MObject()
     inputRotationRandomnessAttr = OpenMaya.MObject()
+    inputScaleRandomnessAttr = OpenMaya.MObject()
+
+    # Ramp attributes
+    positionRampAttr = OpenMaya.MObject()
+    rotationRampAttr = OpenMaya.MObject()
+    scaleRampAttr = OpenMaya.MObject()
 
     # Output vectors
     outputTranslationAttr = Vector3CompoundAttribute()
@@ -163,30 +171,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         return None
 
-    def draw(self, view, path, style, status):
-
-        try:
-            self.updateInstanceConnections(path)
-        except:
-            sys.stderr.write('Failed trying to update locator. stack trace: \n')
-            sys.stderr.write(traceback.format_exc())
-
-        # Draw simple locator lines
-        view.beginGL()
- 
-        glFT.glBegin(OpenMayaRender.MGL_LINES)
-        glFT.glVertex3f(0.0, -0.5, 0.0)
-        glFT.glVertex3f(0.0, 0.5, 0.0)
-        
-        glFT.glVertex3f(0.5, 0.0, 0.0)
-        glFT.glVertex3f(-0.5, 0.0, 0.0)
-
-        glFT.glVertex3f(0.0, 0.0, 0.5)
-        glFT.glVertex3f(0.0, 0.0, -0.5)      
-        glFT.glEnd()
- 
-        view.endGL()
-
     # Calculate expected instances by the instancing mode
     def getInstanceCountByMode(self):
         instancingModePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instancingModeAttr)
@@ -283,18 +267,28 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         # Remove instances if necessary
         elif numConnectedElements > expectedInstanceCount:
 
-            mdgModifier = OpenMaya.MDGModifier()
             connections = OpenMaya.MPlugArray()        
             toRemove = numConnectedElements - expectedInstanceCount
 
+            mdgModifier = OpenMaya.MDGModifier()
             for i in xrange(toRemove):
                 outputTranslationPlugElement = outputTranslationPlug.connectionByPhysicalIndex(numConnectedElements - 1 - i)
                 outputTranslationPlugElement.connectedTo(connections, False, True)
-                
-                for c in xrange(connections.length()):
-                    mdgModifier.deleteNode(connections[c].node())
 
+                print outputTranslationPlugElement.name()
+                print str(connections) + ", " +  str(connections.length())
+                
+
+                for c in xrange(connections.length()):
+                    print connections[c].node().isNull()
+                    print "About to disconnect plug " + connections[c].name()
+                    print "About to delete node " + OpenMaya.MFnDependencyNode(connections[c].node()).name()
+                    mdgModifier.deleteNode(connections[c].node())
+                    # mdgModifier.disconnect(outputTranslationPlugElement, connections[c])
+
+            print "About to do it! " + str(mdgModifier)
             mdgModifier.doIt()
+            print "Did it!"
 
     def updateInstancePositions(self, curveFn, dataBlock, count):
 
@@ -323,6 +317,45 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             translateArrayHandle.setAllClean()
             translateArrayHandle.setClean()
+
+
+    def getRampValueAtPosition(self, ramp, position):
+
+        util = OpenMaya.MScriptUtil()
+        util.createFromDouble(0.0)
+        valuePtr = util.asFloatPtr()
+
+        ramp.getValueAtPosition(position, valuePtr)
+
+        return util.getFloat(valuePtr)
+
+    def updateInstanceScale(self, curveFn, dataBlock, count):
+
+            point = OpenMaya.MPoint()
+            scaleArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputScaleAttr.compound)
+
+            # Deterministic random
+            randomScale = dataBlock.outputValue(instanceAlongCurveLocator.inputScaleRandomnessAttr).asFloat()
+            random.seed(count)
+
+            scaleRampPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.scaleRampAttr)
+            scaleRamp = OpenMaya.MRampAttribute(scaleRampPlug)
+
+            # Make sure there are enough handles...
+            for i in xrange(min(count, scaleArrayHandle.elementCount())):
+
+                rampValue = self.getRampValueAtPosition(scaleRamp, (i / float(count)))
+
+                point.x = random.random() * randomScale + rampValue
+                point.y = random.random() * randomScale + rampValue
+                point.z = random.random() * randomScale + rampValue
+
+                scaleArrayHandle.jumpToArrayElement(i)
+                scaleHandle = scaleArrayHandle.outputValue()
+                scaleHandle.set3Double(point.x, point.y, point.z)
+
+            scaleArrayHandle.setAllClean()
+            scaleArrayHandle.setClean()
 
     def updateInstanceRotations(self, curveFn, dataBlock, count):
             point = OpenMaya.MPoint()
@@ -377,10 +410,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             rotationArrayHandle.setAllClean()
             rotationArrayHandle.setClean()
 
-    # TODO: investigate this
-    # def legalDisconnection(self, plug, otherPlug, asSrc, isLegal):
-    #     # isLegal = self.canDisconnect
-
     def compute(self, plug, dataBlock):
         try:
             timeDataHandle = dataBlock.inputValue( instanceAlongCurveLocator.inputTimeAttr )
@@ -401,6 +430,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                 if plug == instanceAlongCurveLocator.outputRotationAttr.compound:
                     self.updateInstanceRotations(curveFn, dataBlock, instanceCount)
+
+                if plug == instanceAlongCurveLocator.outputScaleAttr.compound:
+                    self.updateInstanceScale(curveFn, dataBlock, instanceCount)
 
         except:
             sys.stderr.write('Failed trying to compute locator. stack trace: \n')
@@ -469,7 +501,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.instanceCountAttr = nAttr.create("instanceCount", "iic", OpenMaya.MFnNumericData.kInt, 5)
         nAttr.setMin(1)
         nAttr.setSoftMax(100)
-        nAttr.setChannelBox( True )
+        nAttr.setChannelBox( False )
         nAttr.setConnectable( False )
         node.addAttribute( node.instanceCountAttr)
 
@@ -477,7 +509,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.maxInstancesByLengthAttr = nAttr.create("maxInstancesByLength", "mibl", OpenMaya.MFnNumericData.kInt, 50)
         nAttr.setMin(0)
         nAttr.setSoftMax(200)
-        nAttr.setChannelBox( True )
+        nAttr.setChannelBox( False )
         nAttr.setConnectable( False )
         node.addAttribute( node.maxInstancesByLengthAttr)
 
@@ -485,7 +517,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.instanceLengthAttr = nAttr.create("instanceLength", "ilength", OpenMaya.MFnNumericData.kFloat, 1.0)
         nAttr.setMin(0.01)
         nAttr.setSoftMax(1.0)
-        nAttr.setChannelBox( True )
+        nAttr.setChannelBox( False )
         nAttr.setConnectable( False )
         node.addAttribute( node.instanceLengthAttr)
 
@@ -500,6 +532,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setSoftMax(90.0)
         nAttr.setKeyable( True )
         node.addAttribute( node.inputRotationRandomnessAttr )
+
+        node.inputScaleRandomnessAttr = nAttr.create("inputScaleRandomness", "inputScaleRandomness", OpenMaya.MFnNumericData.kFloat, 0.0)
+        nAttr.setMin(0.0)
+        nAttr.setSoftMax(1.0)
+        nAttr.setKeyable( True )
+        node.addAttribute( node.inputScaleRandomnessAttr )
 
         # Display override options
         node.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
@@ -525,6 +563,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         enumFn.setDefault("Tangent")
         node.addAttribute( node.orientationModeAttr )
 
+        node.scaleRampAttr = OpenMaya.MRampAttribute.createCurveRamp("scaleRamp", "scaleRamp")
+        node.addAttribute( node.scaleRampAttr )
+
         node.addCompoundVector3Attribute(node.inputOrientationAxisAttr, "inputOrientationAxis", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 1.0))
 
         node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean)
@@ -533,7 +574,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         # Output attributes
         node.addCompoundVector3Attribute(node.outputTranslationAttr, "outputTranslation", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
-        # node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale")
+        node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(1.0, 1.0, 1.0))
 
         node.attributeAffects( node.inputTimeAttr, node.outputTranslationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputTranslationAttr.compound )
@@ -553,6 +594,17 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.inputRotationRandomnessAttr, node.outputRotationAttr.compound)
 
         node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
+
+        node.attributeAffects( node.inputTimeAttr, node.outputScaleAttr.compound )
+        node.attributeAffects( node.inputCurveAttr, node.outputScaleAttr.compound )
+        node.attributeAffects( node.instanceCountAttr, node.outputScaleAttr.compound)
+        node.attributeAffects( node.instanceLengthAttr, node.outputScaleAttr.compound)
+        node.attributeAffects( node.instancingModeAttr, node.outputScaleAttr.compound)
+        node.attributeAffects( node.maxInstancesByLengthAttr, node.outputScaleAttr.compound)
+        node.attributeAffects( node.inputScaleRandomnessAttr, node.outputScaleAttr.compound)
+    
+        node.attributeAffects( node.scaleRampAttr, node.outputScaleAttr.compound)
+
 
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
@@ -607,9 +659,11 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.beginLayout("Instance Along Curve Settings" ,collapse=0)
 
             self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
-            self.addControl("instanceCount", label="Count")
-            self.addControl("instanceLength", label="Distance")
-            self.addControl("maxInstancesByLength", label="Max Instances")
+            self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceCountChanged)
+            self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceCountChanged)
+            self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceCountChanged)
+
+            self.callCustom(self.onControlBuild, self.onControlUpdate, "instancingMode")
             
             self.addSeparator()
 
@@ -618,8 +672,13 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
             self.addSeparator()
 
+            mel.eval('AEaddRampControl("' + nodeName + '.scaleRamp"); ')
+
+            self.addSeparator()
+
             self.addControl("inputPositionRandomness", label="Position random")
             self.addControl("inputRotationRandomness", label="Rotation random (angle)")
+            self.addControl("inputScaleRandomness", label="Scale random")
 
             self.addSeparator()
             
@@ -628,7 +687,6 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             
             self.addSeparator()
             
-            self.addControl("inputCurve", label="Input curve")
             self.addControl("inputTransform", label="Input object")
             self.addControl("inputShadingGroup", label="Shading Group")
             self.addExtraControls()
@@ -636,8 +694,90 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.endLayout()
             self.endScrollLayout()
 
+    def onRampUpdate(self, attr):
+        print attr
+        pm.gradientControl(attr)
+
+    def onControlUpdate(self, attr):
+        None
+        # expectedCount = self.getExpectedCount(self.node)
+        # pm.text("Expected count: " + str(expectedCount))
+
+    def onControlBuild(self, attr):
+        # pm.button(label="Update").setCommand(self.onUpdateButtonPressed)
+        None
+
+    def onUpdateButtonPressed(self, *args):        
+        None
+
+    def getExpectedCount(self, node):
+        mode = node.instancingMode.get()
+        
+        if node.inputCurve.isConnected() and mode == 1:
+            instanceLength = node.instanceLength.get()
+            maxInstancesByLength = node.maxInstancesByLength.get()
+            curveLength = pm.PyNode(node.inputCurve.inputs()[0]).length()
+            return min(maxInstancesByLength, int(curveLength / instanceLength))
+
+        # InstanceCount attr conflicts with pymel method
+        return node.attr("instanceCount").get()
+
+    def onInstanceCountChanged(self, nodeName):
+        if pm.PyNode(nodeName).type() == kPluginNodeName:
+
+            node = pm.PyNode(nodeName)
+            expectedCount = self.getExpectedCount(node)
+            connectedElements = node.outputTranslation.numConnectedElements()
+
+            # Only instance if we are missing elements
+            if connectedElements < expectedCount:
+
+                if node.inputTransform.isConnected():
+
+                    inputTransform = pm.PyNode(node.inputTransform.inputs()[0])
+                    instanceCount = expectedCount - connectedElements
+
+                    instances = []
+
+                    for i in xrange(instanceCount):
+
+                        instance = pm.instance(inputTransform, leaf = False)[0]
+
+                        # Parent instance to transform node
+                        transformNode = node.getParent()
+                        transformNode.addChild(instance)
+
+                        # Transformation connections
+                        node.outputTranslation[connectedElements + i].connect(instance.translate)
+                        node.outputRotation[connectedElements + i].connect(instance.rotate)
+                        node.outputScale[connectedElements + i].connect(instance.scale)
+
+                        # Overrides
+                        instance.overrideEnabled.set(True)
+                        node.instanceDisplayType.connect(instance.overrideDisplayType)
+                        node.instanceBoundingBox.connect(instance.overrideLevelOfDetail)
+
+                        instances.append(instance)
+
+                    # Assign shading group to all instances
+                    pm.sets(node.inputShadingGroup.get(), forceElement=instances)
+
+                    # For some reason it seems to lose focus, so reselect!
+                    pm.select(node)
+            else:
+                
+                connections = node.outputTranslation.outputs()
+                toRemove = connectedElements - expectedCount
+
+                for i in xrange(toRemove):
+                    element = node.outputTranslation[connectedElements - 1 - i]
+                    pm.delete(element.outputs()[0])
+
     def onInstanceModeChanged(self, nodeName):
         if pm.PyNode(nodeName).type() == kPluginNodeName:
+
+            self.onInstanceCountChanged(nodeName)
+
             nodeAttr = pm.PyNode(nodeName + ".instancingMode")
             mode = nodeAttr.get("instancingMode")
             self.dimControl(nodeName, "instanceLength", mode == 0)
@@ -751,6 +891,16 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                     nodeShapeDagPath.extendToShape()
                     newNodeFn = OpenMaya.MFnDagNode(nodeShapeDagPath)
 
+                    # Set default ramp values
+                    defaultPositions = OpenMaya.MFloatArray(1, 0.0)
+                    defaultValues = OpenMaya.MFloatArray(1, 1.0)
+                    defaultInterpolations = OpenMaya.MIntArray(1, 3)
+
+                    scaleRampPlug = newNodeFn.findPlug(instanceAlongCurveLocator.scaleRampAttr)
+                    scaleRamp = OpenMaya.MRampAttribute(scaleRampPlug)
+                    scaleRamp.addEntries(defaultPositions, defaultValues, defaultInterpolations)
+
+                    # Select new node shape
                     OpenMaya.MGlobal.clearSelectionList()
                     msel = OpenMaya.MSelectionList()
                     msel.add(nodeShapeDagPath)
