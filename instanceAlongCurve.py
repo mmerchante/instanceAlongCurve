@@ -1,5 +1,6 @@
 import sys
 import pdb
+import math
 import random
 import traceback
 import maya.mel as mel
@@ -21,8 +22,6 @@ glFT = glRenderer.glFunctionTable()
 #   - Random meshes
 #   - New orientation mode: time warping on input transform. A nice domino effect can be done this way
 #   - Modulate attributes (pos, rot, scale) along curve's parameter space through user defined curves
-#   - Add time phase on ramped attributes :)
-
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -60,6 +59,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     positionRampAttr = OpenMaya.MObject()
     rotationRampAttr = OpenMaya.MObject()
     scaleRampAttr = OpenMaya.MObject()
+
+    rampOffsetAttr = OpenMaya.MObject()
 
     # Output vectors
     outputTranslationAttr = Vector3CompoundAttribute()
@@ -341,10 +342,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             scaleRampPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.scaleRampAttr)
             scaleRamp = OpenMaya.MRampAttribute(scaleRampPlug)
 
+            rampOffset = dataBlock.inputValue(instanceAlongCurveLocator.rampOffsetAttr).asFloat()
+
             # Make sure there are enough handles...
             for i in xrange(min(count, scaleArrayHandle.elementCount())):
 
-                rampValue = self.getRampValueAtPosition(scaleRamp, (i / float(count)))
+                rampPosition = math.fmod((i / float(count)) + rampOffset, 1.0)
+
+                rampValue = self.getRampValueAtPosition(scaleRamp, rampPosition)
 
                 point.x = random.random() * randomScale + rampValue
                 point.y = random.random() * randomScale + rampValue
@@ -566,6 +571,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.scaleRampAttr = OpenMaya.MRampAttribute.createCurveRamp("scaleRamp", "scaleRamp")
         node.addAttribute( node.scaleRampAttr )
 
+        node.rampOffsetAttr = nAttr.create("rampOffset", "rampOffset", OpenMaya.MFnNumericData.kFloat, 0.0)
+        nAttr.setKeyable( True )
+        node.addAttribute( node.rampOffsetAttr )
+
         node.addCompoundVector3Attribute(node.inputOrientationAxisAttr, "inputOrientationAxis", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 1.0))
 
         node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean)
@@ -576,6 +585,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(1.0, 1.0, 1.0))
 
+        # Translation affects
         node.attributeAffects( node.inputTimeAttr, node.outputTranslationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputTranslationAttr.compound )
         node.attributeAffects( node.instanceCountAttr, node.outputTranslationAttr.compound)
@@ -584,6 +594,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.inputPositionRandomnessAttr, node.outputTranslationAttr.compound)
 
+        # Rotation affects
         node.attributeAffects( node.inputTimeAttr, node.outputRotationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputRotationAttr.compound )
         node.attributeAffects( node.instanceCountAttr, node.outputRotationAttr.compound)
@@ -595,6 +606,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
 
+        # Scale affects
         node.attributeAffects( node.inputTimeAttr, node.outputScaleAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputScaleAttr.compound )
         node.attributeAffects( node.instanceCountAttr, node.outputScaleAttr.compound)
@@ -605,7 +617,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     
         node.attributeAffects( node.scaleRampAttr, node.outputScaleAttr.compound)
 
-
+        # Ramp offset
+        node.attributeAffects( node.rampOffsetAttr, node.scaleRampAttr)
+        node.attributeAffects( node.rampOffsetAttr, node.outputScaleAttr.compound)
+        
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
@@ -673,6 +688,8 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.addSeparator()
 
             mel.eval('AEaddRampControl("' + nodeName + '.scaleRamp"); ')
+
+            self.addControl("rampOffset", label="Ramp offset")
 
             self.addSeparator()
 
