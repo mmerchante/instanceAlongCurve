@@ -73,6 +73,24 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     def postConstructor(self):
         OpenMaya.MFnDependencyNode(self.thisMObject()).setName("instanceAlongCurveLocatorShape#")
 
+    # def draw(self, view, path, style, status):
+
+    #     # Draw simple locator lines
+    #     view.beginGL()
+ 
+    #     glFT.glBegin(OpenMayaRender.MGL_LINES)
+    #     glFT.glVertex3f(0.0, -0.5, 0.0)
+    #     glFT.glVertex3f(0.0, 0.5, 0.0)
+        
+    #     glFT.glVertex3f(0.5, 0.0, 0.0)
+    #     glFT.glVertex3f(-0.5, 0.0, 0.0)
+
+    #     glFT.glVertex3f(0.0, 0.0, 0.5)
+    #     glFT.glVertex3f(0.0, 0.0, -0.5)      
+    #     glFT.glEnd()
+ 
+    #     view.endGL()
+
     # Helper function to get an array of available logical indices from the sparse array
     def getAvailableLogicalIndices(self, plug, numIndices):
         
@@ -901,6 +919,7 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                     # Assign new correct name and select new locator
                     newNodeFn = OpenMaya.MFnDagNode(newNode)
                     newNodeFn.setName("instanceAlongCurveLocator#")
+                    newNodeName = newNodeFn.name()
 
                     # Get the node shape
                     nodeShapeDagPath = OpenMaya.MDagPath()
@@ -934,6 +953,9 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                         mdgModifier.connect(shadingGroupMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputShadingGroupAttr))
 
                     mdgModifier.doIt()
+
+                    # (pymel) create a locator and make it the parent
+                    locator = pm.createNode('locator', ss=True, p=newNodeName)
                     
                 else:
                     sys.stderr.write("Please select a curve first")
