@@ -17,13 +17,9 @@ kPluginNodeId = OpenMaya.MTypeId( 0x55555 )
 glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
-# Fixes:
-#   - move instantiation logic outside UI
-
 # Ideas:
 #   - New orientation mode: follow last position. This is cool for random position or position ramp cases
 #   - Random meshes
-#   - New orientation mode: time warping on input transform. A nice domino effect can be done this way
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -608,8 +604,6 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceCountChanged)
             self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceCountChanged)
             self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceCountChanged)
-
-            self.callCustom(self.onControlBuild, self.onControlUpdate, "instancingMode")
             
             self.addSeparator()
 
@@ -642,27 +636,13 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             showRampControls("rotation")
             showRampControls("scale")
             
-            #self.addExtraControls()
+            self.addExtraControls()
 
             self.endLayout()
             self.endScrollLayout()
 
-
     def onRampUpdate(self, attr):
-        print attr
         pm.gradientControl(attr)
-
-    def onControlUpdate(self, attr):
-        None
-        # expectedCount = self.getExpectedCount(self.node)
-        # pm.text("Expected count: " + str(expectedCount))
-
-    def onControlBuild(self, attr):
-        # pm.button(label="Update").setCommand(self.onUpdateButtonPressed)
-        None
-
-    def onUpdateButtonPressed(self, *args):        
-        None
 
     def getExpectedCount(self, node):
         mode = node.instancingMode.get()
