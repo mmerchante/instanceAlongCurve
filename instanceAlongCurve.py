@@ -17,11 +17,13 @@ kPluginNodeId = OpenMaya.MTypeId( 0x55555 )
 glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
 glFT = glRenderer.glFunctionTable()
 
+# Fixes:
+#   - move instantiation logic outside UI
+
 # Ideas:
 #   - New orientation mode: follow last position. This is cool for random position or position ramp cases
 #   - Random meshes
 #   - New orientation mode: time warping on input transform. A nice domino effect can be done this way
-#   - Modulate attributes (pos, rot, scale) along curve's parameter space through user defined curves
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -50,17 +52,30 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     orientationModeAttr = OpenMaya.MObject()
     inputOrientationAxisAttr = Vector3CompoundAttribute()
-    
-    inputPositionRandomnessAttr = OpenMaya.MObject()
-    inputRotationRandomnessAttr = OpenMaya.MObject()
-    inputScaleRandomnessAttr = OpenMaya.MObject()
+
+    class RampAttributes(object):
+
+        def __init__(self):
+            self.ramp = OpenMaya.MObject() # normalized ramp
+            self.rampOffset = OpenMaya.MObject() # evaluation offset for ramp
+            self.rampAxis = OpenMaya.MObject() # ramp normalized axis
+            self.rampAmplitude = OpenMaya.MObject() # ramp amplitude
+            self.rampRandomAmplitude = OpenMaya.MObject() # ramp random amplitude
+
+    # Simple container class for compound vector attributes
+    class RampValueContainer(object):
+
+        def __init__(self, mObject, dataBlock, rampAttr):            
+            self.ramp = OpenMaya.MRampAttribute(OpenMaya.MPlug(mObject, rampAttr.ramp))
+            self.rampOffset = dataBlock.inputValue(rampAttr.rampOffset).asFloat()
+            self.rampAxis = dataBlock.inputValue(rampAttr.rampAxis.compound).asVector().normal()
+            self.rampAmplitude = dataBlock.inputValue(rampAttr.rampAmplitude).asFloat()
+            self.rampRandomAmplitude = dataBlock.inputValue(rampAttr.rampRandomAmplitude).asFloat()
 
     # Ramp attributes
-    positionRampAttr = OpenMaya.MObject()
-    rotationRampAttr = OpenMaya.MObject()
-    scaleRampAttr = OpenMaya.MObject()
-
-    rampOffsetAttr = OpenMaya.MObject()
+    positionRampAttr = RampAttributes()
+    rotationRampAttr = RampAttributes()
+    scaleRampAttr = RampAttributes()
 
     # Output vectors
     outputTranslationAttr = Vector3CompoundAttribute()
@@ -72,24 +87,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     def postConstructor(self):
         OpenMaya.MFnDependencyNode(self.thisMObject()).setName("instanceAlongCurveLocatorShape#")
-
-    # def draw(self, view, path, style, status):
-
-    #     # Draw simple locator lines
-    #     view.beginGL()
- 
-    #     glFT.glBegin(OpenMayaRender.MGL_LINES)
-    #     glFT.glVertex3f(0.0, -0.5, 0.0)
-    #     glFT.glVertex3f(0.0, 0.5, 0.0)
-        
-    #     glFT.glVertex3f(0.5, 0.0, 0.0)
-    #     glFT.glVertex3f(-0.5, 0.0, 0.0)
-
-    #     glFT.glVertex3f(0.0, 0.0, 0.5)
-    #     glFT.glVertex3f(0.0, 0.0, -0.5)      
-    #     glFT.glEnd()
- 
-    #     view.endGL()
 
     # Helper function to get an array of available logical indices from the sparse array
     def getAvailableLogicalIndices(self, plug, numIndices):
@@ -204,131 +201,38 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
         return instanceCountPlug.asInt()
 
-    def updateInstanceConnections(self, path):
-
-        # If the locator is being instanced, just stop updating its children.
-        # This is to prevent losing references to the locator instances' children
-        # If you want to change this locator, prepare the source before instantiating
-        if OpenMaya.MFnDagNode(self.thisMObject()).isInstanced():
-            return OpenMaya.kUnknownParameter
-
-        expectedInstanceCount = self.getInstanceCountByMode()
-        outputTranslationPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.outputTranslationAttr.compound)
-        outputRotationPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.outputRotationAttr.compound)    
-        numConnectedElements = outputTranslationPlug.numConnectedElements()
-
-        # Only instance if we are missing elements
-        # TODO: handle mismatches in translation/rotation plug connected elements (user deleted a plug? use connectionBroken method?)
-        if numConnectedElements < expectedInstanceCount:
-
-            inputTransformFn = self.getInputTransformFn()
-
-            if inputTransformFn is not None:
-
-                # Get shading group first
-                dagPath = OpenMaya.MDagPath()
-                inputTransformFn.getPath(dagPath)
-                shadingGroupFn = self.getShadingGroup()
-
-                instanceCount = expectedInstanceCount - numConnectedElements
-                availableIndices = self.getAvailableLogicalIndices(outputTranslationPlug, instanceCount)
-
-                # Consider path for instances!
-                nodeFn = OpenMaya.MFnDagNode(path.transform())
-
-                displayPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.displayTypeAttr)
-                LODPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.bboxAttr)
-
-                mdgModifier = OpenMaya.MDagModifier()
-
-                # Instance as many times as necessary
-                for i in availableIndices:
-                    
-                    # Instance transform
-                    # InstanceLeaf must be set to False to prevent crashes :)
-                    trInstance = inputTransformFn.duplicate(True, False)
-                    instanceFn = OpenMaya.MFnTransform(trInstance)
-
-                    # Parent new instance
-                    nodeFn.addChild(trInstance)
-
-                    # Recursively assign shading group
-                    if shadingGroupFn is not None:
-                        self.assignShadingGroup(shadingGroupFn, OpenMaya.MFnDagNode(trInstance))
-
-                    instanceTranslatePlug = instanceFn.findPlug('translate', False)
-                    outputTranslationPlugElement = outputTranslationPlug.elementByLogicalIndex(i)
-
-                    instanceRotationPlug = instanceFn.findPlug('rotate', False)
-                    outputRotationPlugElement = outputRotationPlug.elementByLogicalIndex(i)
-
-                    # Enable drawing overrides
-                    overrideEnabledPlug = instanceFn.findPlug("overrideEnabled", False)
-                    overrideEnabledPlug.setBool(True)
-
-                    instanceDisplayPlug = instanceFn.findPlug("overrideDisplayType", False)
-                    instanceLODPlug = instanceFn.findPlug("overrideLevelOfDetail", False)
-
-                    if not outputTranslationPlugElement.isConnected():
-                        mdgModifier.connect(outputTranslationPlugElement, instanceTranslatePlug)
-
-                    if not outputRotationPlugElement.isConnected():
-                        mdgModifier.connect(outputRotationPlugElement, instanceRotationPlug)
-
-                    if not instanceDisplayPlug.isConnected():
-                        mdgModifier.connect(displayPlug, instanceDisplayPlug)
-
-                    if not instanceLODPlug.isConnected():
-                        mdgModifier.connect(LODPlug, instanceLODPlug)
-
-                mdgModifier.doIt()
-
-        # Remove instances if necessary
-        elif numConnectedElements > expectedInstanceCount:
-
-            connections = OpenMaya.MPlugArray()        
-            toRemove = numConnectedElements - expectedInstanceCount
-
-            mdgModifier = OpenMaya.MDGModifier()
-            for i in xrange(toRemove):
-                outputTranslationPlugElement = outputTranslationPlug.connectionByPhysicalIndex(numConnectedElements - 1 - i)
-                outputTranslationPlugElement.connectedTo(connections, False, True)
-
-                print outputTranslationPlugElement.name()
-                print str(connections) + ", " +  str(connections.length())
-                
-
-                for c in xrange(connections.length()):
-                    print connections[c].node().isNull()
-                    print "About to disconnect plug " + connections[c].name()
-                    print "About to delete node " + OpenMaya.MFnDependencyNode(connections[c].node()).name()
-                    mdgModifier.deleteNode(connections[c].node())
-                    # mdgModifier.disconnect(outputTranslationPlugElement, connections[c])
-
-            print "About to do it! " + str(mdgModifier)
-            mdgModifier.doIt()
-            print "Did it!"
-
     def updateInstancePositions(self, curveFn, dataBlock, count):
 
             point = OpenMaya.MPoint()
             curveLength = curveFn.length()
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
 
-            randomRadius = dataBlock.outputValue(instanceAlongCurveLocator.inputPositionRandomnessAttr).asFloat()
-
             # Deterministic random
             random.seed(count)
+            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.positionRampAttr)
 
             # Make sure there are enough handles...
             for i in xrange(min(count, translateArrayHandle.elementCount())):
 
+                rampValue = self.getRampValueAtPosition(rampValues, i, count)
+
                 param = curveFn.findParamFromLength(curveLength * (i / float(count)))
                 curveFn.getPointAtParam(param, point)
 
-                point.x += (random.random() * 2.0 - 1.0) * randomRadius
-                point.y += (random.random() * 2.0 - 1.0) * randomRadius
-                point.z += (random.random() * 2.0 - 1.0) * randomRadius
+                normal = curveFn.normal(param).normal()
+                tangent = curveFn.tangent(param).normal()
+                bitangent = (normal ^ tangent).normal()
+
+                twistNormal = normal * (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.x
+                twistTangent = tangent * (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.y
+                twistBitangent = bitangent * (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.z
+
+                #point.x = (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.x
+                # point.x += ((random.random() * 2.0 - 1.0) * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.x
+                # point.y += ((random.random() * 2.0 - 1.0) * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.y
+                # point.z += ((random.random() * 2.0 - 1.0) * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.z
+
+                point += twistNormal + twistTangent + twistBitangent
 
                 translateArrayHandle.jumpToArrayElement(i)
                 translateHandle = translateArrayHandle.outputValue()
@@ -337,14 +241,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             translateArrayHandle.setAllClean()
             translateArrayHandle.setClean()
 
-
-    def getRampValueAtPosition(self, ramp, position):
+    def getRampValueAtPosition(self, rampValues, i, count):
 
         util = OpenMaya.MScriptUtil()
         util.createFromDouble(0.0)
         valuePtr = util.asFloatPtr()
-
-        ramp.getValueAtPosition(position, valuePtr)
+        
+        position = math.fmod((i / float(count)) + rampValues.rampOffset, 1.0)
+        rampValues.ramp.getValueAtPosition(position, valuePtr)
 
         return util.getFloat(valuePtr)
 
@@ -354,24 +258,17 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             scaleArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputScaleAttr.compound)
 
             # Deterministic random
-            randomScale = dataBlock.outputValue(instanceAlongCurveLocator.inputScaleRandomnessAttr).asFloat()
             random.seed(count)
-
-            scaleRampPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.scaleRampAttr)
-            scaleRamp = OpenMaya.MRampAttribute(scaleRampPlug)
-
-            rampOffset = dataBlock.inputValue(instanceAlongCurveLocator.rampOffsetAttr).asFloat()
+            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.scaleRampAttr)
 
             # Make sure there are enough handles...
             for i in xrange(min(count, scaleArrayHandle.elementCount())):
 
-                rampPosition = math.fmod((i / float(count)) + rampOffset, 1.0)
+                rampValue = self.getRampValueAtPosition(rampValues, i, count)
 
-                rampValue = self.getRampValueAtPosition(scaleRamp, rampPosition)
-
-                point.x = random.random() * randomScale + rampValue
-                point.y = random.random() * randomScale + rampValue
-                point.z = random.random() * randomScale + rampValue
+                point.x = (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.x
+                point.y = (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.y
+                point.z = (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.z
 
                 scaleArrayHandle.jumpToArrayElement(i)
                 scaleHandle = scaleArrayHandle.outputValue()
@@ -386,11 +283,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
             startOrientation = dataBlock.outputValue(instanceAlongCurveLocator.inputOrientationAxisAttr.compound).asVector().normal()
 
-            randomRadius = dataBlock.outputValue(instanceAlongCurveLocator.inputRotationRandomnessAttr).asFloat()
-            randomRadius *= 3.141592 / 180.0
-
             # Deterministic random
             random.seed(count)
+            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.rotationRampAttr)
 
             rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()
 
@@ -402,29 +297,37 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             for i in xrange(min(count, rotationArrayHandle.elementCount())):
 
+                rampValue = self.getRampValueAtPosition(rampValues, i, count)
+ 
                 param = curveFn.findParamFromLength(curveLength * (i / float(count)))
                 rot = OpenMaya.MQuaternion()
 
+                normal = curveFn.normal(param).normal()
+                tangent = curveFn.tangent(param).normal()
+                bitangent = (normal ^ tangent).normal()
+            
                 if rotMode == 1:
                     rot = inputTransformRotation; # No realtime preview - use an inputRotation for that?
                 elif rotMode == 2:
-                    normal = curveFn.normal(param)
                     rot = startOrientation.rotateTo(normal)
                 elif rotMode == 3:
-                    tangent = curveFn.tangent(param)
                     rot = startOrientation.rotateTo(tangent)
                 elif rotMode == 4:
-                    tangent = curveFn.tangent(param)
                     rot = startOrientation.rotateTo(tangent)
                     
                     if i % 2 == 1:
                         rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
 
-                rot = rot.asEulerRotation().asVector()
+                twistNormal = (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.x                
+                twistNormal = OpenMaya.MQuaternion(twistNormal, normal)
 
-                rot.x += (random.random() * 2.0 - 1.0) * randomRadius
-                rot.y += (random.random() * 2.0 - 1.0) * randomRadius
-                rot.z += (random.random() * 2.0 - 1.0) * randomRadius
+                twistTangent = (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.y
+                twistTangent = OpenMaya.MQuaternion(twistTangent, tangent)
+
+                twistBitangent = (random.random() * rampValues.rampRandomAmplitude + rampValue) * rampValues.rampAmplitude * rampValues.rampAxis.z
+                twistBitangent = OpenMaya.MQuaternion(twistBitangent, bitangent)
+
+                rot = (rot * twistNormal * twistTangent * twistBitangent).asEulerRotation().asVector()
 
                 rotationArrayHandle.jumpToArrayElement(i)
                 rotationHandle = rotationArrayHandle.outputValue()
@@ -493,6 +396,31 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setDisconnectBehavior(OpenMaya.MFnAttribute.kDelete)
         cls.addAttribute(compoundAttribute.compound)
 
+    @classmethod
+    def addRampAttributes(cls, rampAttributes, attributeName, unitType, defaultAxisValue):
+
+        unitAttr = OpenMaya.MFnUnitAttribute()
+        nAttr = OpenMaya.MFnNumericAttribute()
+
+        rampAttributes.ramp = OpenMaya.MRampAttribute.createCurveRamp(attributeName + "Ramp", attributeName + "Ramp")
+        cls.addAttribute(rampAttributes.ramp)
+
+        rampAttributes.rampOffset = nAttr.create(attributeName + "RampOffset", attributeName + "RampOffset", OpenMaya.MFnNumericData.kFloat, 0.0)
+        nAttr.setKeyable( True )
+        cls.addAttribute( rampAttributes.rampOffset )
+
+        rampAttributes.rampAmplitude = nAttr.create(attributeName + "RampAmplitude", attributeName + "RampAmplitude", OpenMaya.MFnNumericData.kFloat, 1.0)
+        nAttr.setKeyable( True )
+        cls.addAttribute( rampAttributes.rampAmplitude )
+
+        rampAttributes.rampRandomAmplitude = nAttr.create(attributeName + "RampRandomAmplitude", attributeName + "RampRandomAmplitude", OpenMaya.MFnNumericData.kFloat, 0.0)
+        nAttr.setMin(0.0)
+        nAttr.setSoftMax(1.0)
+        nAttr.setKeyable( True )
+        cls.addAttribute( rampAttributes.rampRandomAmplitude )
+
+        cls.addCompoundVector3Attribute(rampAttributes.rampAxis, attributeName + "RampAxis", unitType, False, True, defaultAxisValue)
+
     @staticmethod
     def nodeInitializer():
 
@@ -544,24 +472,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setConnectable( False )
         node.addAttribute( node.instanceLengthAttr)
 
-        node.inputPositionRandomnessAttr = nAttr.create("inputPositionRandomness", "inputPositionRandomness", OpenMaya.MFnNumericData.kFloat, 0.0)
-        nAttr.setMin(0.0)
-        nAttr.setSoftMax(1.0)
-        nAttr.setKeyable( True )
-        node.addAttribute( node.inputPositionRandomnessAttr )
-
-        node.inputRotationRandomnessAttr = nAttr.create("inputRotationRandomness", "inputRotationRandomness", OpenMaya.MFnNumericData.kFloat, 0.0)
-        nAttr.setMin(0.0)
-        nAttr.setSoftMax(90.0)
-        nAttr.setKeyable( True )
-        node.addAttribute( node.inputRotationRandomnessAttr )
-
-        node.inputScaleRandomnessAttr = nAttr.create("inputScaleRandomness", "inputScaleRandomness", OpenMaya.MFnNumericData.kFloat, 0.0)
-        nAttr.setMin(0.0)
-        nAttr.setSoftMax(1.0)
-        nAttr.setKeyable( True )
-        node.addAttribute( node.inputScaleRandomnessAttr )
-
         # Display override options
         node.displayTypeAttr = enumFn.create('instanceDisplayType', 'idt')
         enumFn.addField( "Normal", 0 );
@@ -586,22 +496,26 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         enumFn.setDefault("Tangent")
         node.addAttribute( node.orientationModeAttr )
 
-        node.scaleRampAttr = OpenMaya.MRampAttribute.createCurveRamp("scaleRamp", "scaleRamp")
-        node.addAttribute( node.scaleRampAttr )
-
-        node.rampOffsetAttr = nAttr.create("rampOffset", "rampOffset", OpenMaya.MFnNumericData.kFloat, 0.0)
-        nAttr.setKeyable( True )
-        node.addAttribute( node.rampOffsetAttr )
-
         node.addCompoundVector3Attribute(node.inputOrientationAxisAttr, "inputOrientationAxis", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 1.0))
 
         node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean)
         node.addAttribute( node.bboxAttr )
 
+        node.addRampAttributes(node.positionRampAttr, "position", OpenMaya.MFnUnitAttribute.kDistance, OpenMaya.MVector(0.0, 0.0, 0.0))
+        node.addRampAttributes(node.rotationRampAttr, "rotation", OpenMaya.MFnUnitAttribute.kAngle, OpenMaya.MVector(0.0, 0.0, 0.0))
+        node.addRampAttributes(node.scaleRampAttr, "scale", OpenMaya.MFnUnitAttribute.kDistance, OpenMaya.MVector(1.0, 1.0, 1.0))
+
         # Output attributes
         node.addCompoundVector3Attribute(node.outputTranslationAttr, "outputTranslation", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(1.0, 1.0, 1.0))
+
+        def rampAttributeAffects(rampAttributes, affectedAttr):
+            node.attributeAffects( rampAttributes.ramp, affectedAttr)
+            node.attributeAffects( rampAttributes.rampOffset, affectedAttr)
+            node.attributeAffects( rampAttributes.rampAmplitude, affectedAttr)
+            node.attributeAffects( rampAttributes.rampAxis.compound, affectedAttr)
+            node.attributeAffects( rampAttributes.rampRandomAmplitude, affectedAttr)
 
         # Translation affects
         node.attributeAffects( node.inputTimeAttr, node.outputTranslationAttr.compound )
@@ -610,7 +524,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instanceLengthAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.instancingModeAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputTranslationAttr.compound)
-        node.attributeAffects( node.inputPositionRandomnessAttr, node.outputTranslationAttr.compound)
+
+        rampAttributeAffects(node.positionRampAttr, node.outputTranslationAttr.compound)
 
         # Rotation affects
         node.attributeAffects( node.inputTimeAttr, node.outputRotationAttr.compound )
@@ -620,9 +535,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instancingModeAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.orientationModeAttr, node.outputRotationAttr.compound)
-        node.attributeAffects( node.inputRotationRandomnessAttr, node.outputRotationAttr.compound)
 
         node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
+
+        rampAttributeAffects(node.rotationRampAttr, node.outputRotationAttr.compound)
 
         # Scale affects
         node.attributeAffects( node.inputTimeAttr, node.outputScaleAttr.compound )
@@ -631,13 +547,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instanceLengthAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.instancingModeAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputScaleAttr.compound)
-        node.attributeAffects( node.inputScaleRandomnessAttr, node.outputScaleAttr.compound)
-    
-        node.attributeAffects( node.scaleRampAttr, node.outputScaleAttr.compound)
 
-        # Ramp offset
-        node.attributeAffects( node.rampOffsetAttr, node.scaleRampAttr)
-        node.attributeAffects( node.rampOffsetAttr, node.outputScaleAttr.compound)
+        rampAttributeAffects(node.scaleRampAttr, node.outputScaleAttr.compound)
+
         
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
@@ -688,6 +600,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
         self.node = pm.PyNode(self.nodeName)
 
         if self.node.type() == kPluginNodeName:
+
             self.beginScrollLayout()
             self.beginLayout("Instance Along Curve Settings" ,collapse=0)
 
@@ -705,18 +618,6 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
             self.addSeparator()
 
-            mel.eval('AEaddRampControl("' + nodeName + '.scaleRamp"); ')
-
-            self.addControl("rampOffset", label="Ramp offset")
-
-            self.addSeparator()
-
-            self.addControl("inputPositionRandomness", label="Position random")
-            self.addControl("inputRotationRandomness", label="Rotation random (angle)")
-            self.addControl("inputScaleRandomness", label="Scale random")
-
-            self.addSeparator()
-            
             self.addControl("instanceDisplayType", label="Instance Display Type")
             self.addControl("instanceBoundingBox", label="Use bounding box")
             
@@ -724,10 +625,28 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             
             self.addControl("inputTransform", label="Input object")
             self.addControl("inputShadingGroup", label="Shading Group")
-            self.addExtraControls()
+
+            def showRampControls(rampName):
+
+                self.beginLayout(rampName.capitalize() + " Control", collapse=True)
+                mel.eval('AEaddRampControl("' + nodeName + "." + rampName + 'Ramp"); ')
+
+                self.addControl(rampName + "RampOffset", label= rampName.capitalize() + " Ramp Offset")
+                self.addControl(rampName + "RampAmplitude", label= rampName.capitalize() + " Ramp Amplitude")
+                self.addControl(rampName + "RampRandomAmplitude", label= rampName.capitalize() + " Ramp Random")
+                self.addControl(rampName + "RampAxis", label= rampName.capitalize() + " Ramp Axis")
+
+                self.endLayout()
+
+            showRampControls("position")
+            showRampControls("rotation")
+            showRampControls("scale")
+            
+            #self.addExtraControls()
 
             self.endLayout()
             self.endScrollLayout()
+
 
     def onRampUpdate(self, attr):
         print attr
@@ -927,14 +846,20 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                     nodeShapeDagPath.extendToShape()
                     newNodeFn = OpenMaya.MFnDagNode(nodeShapeDagPath)
 
-                    # Set default ramp values
-                    defaultPositions = OpenMaya.MFloatArray(1, 0.0)
-                    defaultValues = OpenMaya.MFloatArray(1, 1.0)
-                    defaultInterpolations = OpenMaya.MIntArray(1, 3)
+                    def setupRamp(rampAttr):
 
-                    scaleRampPlug = newNodeFn.findPlug(instanceAlongCurveLocator.scaleRampAttr)
-                    scaleRamp = OpenMaya.MRampAttribute(scaleRampPlug)
-                    scaleRamp.addEntries(defaultPositions, defaultValues, defaultInterpolations)
+                        # Set default ramp values
+                        defaultPositions = OpenMaya.MFloatArray(1, 0.0)
+                        defaultValues = OpenMaya.MFloatArray(1, 1.0)
+                        defaultInterpolations = OpenMaya.MIntArray(1, 3)
+
+                        plug = newNodeFn.findPlug(rampAttr.ramp)
+                        ramp = OpenMaya.MRampAttribute(plug)
+                        ramp.addEntries(defaultPositions, defaultValues, defaultInterpolations)
+
+                    setupRamp(instanceAlongCurveLocator.positionRampAttr)
+                    setupRamp(instanceAlongCurveLocator.rotationRampAttr)
+                    setupRamp(instanceAlongCurveLocator.scaleRampAttr)
 
                     # Select new node shape
                     OpenMaya.MGlobal.clearSelectionList()
@@ -956,6 +881,9 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
 
                     # (pymel) create a locator and make it the parent
                     locator = pm.createNode('locator', ss=True, p=newNodeName)
+
+                    # Show AE because instancing logic depends on update...
+                    mel.eval("openAEWindow")
                     
                 else:
                     sys.stderr.write("Please select a curve first")
