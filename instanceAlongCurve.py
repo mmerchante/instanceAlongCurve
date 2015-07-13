@@ -1,5 +1,4 @@
 import sys
-import pdb
 import math
 import random
 import traceback
@@ -14,12 +13,11 @@ kPluginNodeName = 'instanceAlongCurveLocator'
 kPluginNodeClassify = 'utility/general'
 kPluginNodeId = OpenMaya.MTypeId( 0x55555 ) 
 
-glRenderer = OpenMayaRender.MHardwareRenderer.theRenderer()
-glFT = glRenderer.glFunctionTable()
-
-# Ideas:
+# Ideas
 #   - New orientation mode: follow last position. This is cool for random position or position ramp cases
 #   - Random meshes
+
+# InstanceAlongCurve v1.0
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -81,9 +79,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     def __init__(self):
         OpenMayaMPx.MPxLocatorNode.__init__(self)
 
+    # This method is not being called?
+    # def __del__(self):
+    #     print "CALLBACK: " + str(callbackId)
+    #     OpenMaya.MNodeMessage.removeCallback(self.callbackId)
+    #     OpenMayaMPx.MPxLocatorNode.__del__(self)
+
     def postConstructor(self):
         OpenMaya.MFnDependencyNode(self.thisMObject()).setName("instanceAlongCurveLocatorShape#")
-        OpenMaya.MNodeMessage.addAttributeChangedCallback(self.thisMObject(), self.attrChangeCallback)
+        self.callbackId = OpenMaya.MNodeMessage.addAttributeChangedCallback(self.thisMObject(), self.attrChangeCallback)
         self.updateInstanceConnections()
 
     # Find original SG to reassign it to instance
@@ -248,23 +252,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             mdgModifier.doIt()
 
-    def getExpectedCountPM(self, node):
-        mode = node.instancingMode.get()
-        
-        if node.inputCurve.isConnected() and mode == 1:
-            instanceLength = node.instanceLength.get()
-            maxInstancesByLength = node.maxInstancesByLength.get()
-            curveLength = pm.PyNode(node.inputCurve.inputs()[0]).length()
-            return min(maxInstancesByLength, int(curveLength / instanceLength))
-
-        # InstanceCount attr conflicts with pymel method
-        return node.attr("instanceCount").get()
-
     def attrChangeCallback(self, msg, plug, otherPlug, clientData):
 
         incomingDirection = (OpenMaya.MNodeMessage.kIncomingDirection & msg) == OpenMaya.MNodeMessage.kIncomingDirection
         attributeSet = (OpenMaya.MNodeMessage.kAttributeSet & msg) == OpenMaya.MNodeMessage.kAttributeSet
-        isCorrectAttribute = (plug.attribute() == instanceAlongCurveLocator.instanceCountAttr)
+        isCorrectAttribute = (plug.attribute() == instanceAlongCurveLocator.instanceCountAttr) 
+        isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.instancingModeAttr)
+        isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.instanceLengthAttr)
+        isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.maxInstancesByLengthAttr)
         isCorrectNode = OpenMaya.MFnDependencyNode(plug.node()).typeName() == kPluginNodeName
 
         try:
@@ -461,6 +456,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             rotationArrayHandle.setAllClean()
             rotationArrayHandle.setClean()
 
+    def isBounded(self):
+        return True
+
+    def boundingBox(self):
+        return OpenMaya.MBoundingBox(OpenMaya.MPoint(-1,-1,-1), OpenMaya.MPoint(1,1,1))
+
     def compute(self, plug, dataBlock):
         try:
             timeDataHandle = dataBlock.inputValue( instanceAlongCurveLocator.inputTimeAttr )
@@ -471,8 +472,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             if not curve.isNull():
                 curveFn = OpenMaya.MFnNurbsCurve(curve)
-
-                # print "Computing! " + plug.info()
 
                 instanceCount = self.getInstanceCountByMode()
 
@@ -726,27 +725,27 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
         if self.node.type() == kPluginNodeName:
 
             self.beginScrollLayout()
-            self.beginLayout("Instance Along Curve Settings" ,collapse=0)
+            self.beginLayout("Instance Along Curve Settings", collapse=0)
 
             self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
-            self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceCountChanged)
-            self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceCountChanged)
-            self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceCountChanged)
+            self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceModeChanged)
+            self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceModeChanged)
+            self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceModeChanged)
             
             self.addSeparator()
 
-            self.addControl("orientationMode", label="Orientation Mode")
-            self.addControl("inputOrientationAxis", label="Orientation Axis")
+            self.addControl("orientationMode", label="Orientation Mode", changeCommand=lambda nodeName: self.updateDimming(nodeName, "orientationMode"))
+            self.addControl("inputOrientationAxis", label="Orientation Axis", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputOrientationAxis"))
 
             self.addSeparator()
 
-            self.addControl("instanceDisplayType", label="Instance Display Type")
-            self.addControl("instanceBoundingBox", label="Use bounding box")
+            self.addControl("instanceDisplayType", label="Instance Display Type", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceDisplayType"))
+            self.addControl("instanceBoundingBox", label="Use bounding box", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceBoundingBox"))
             
             self.addSeparator()
             
-            self.addControl("inputTransform", label="Input object")
-            self.addControl("inputShadingGroup", label="Shading Group")
+            self.addControl("inputTransform", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransform"))
+            self.addControl("inputShadingGroup", label="Shading Group", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputShadingGroup"))
 
             def showRampControls(rampName):
 
@@ -772,83 +771,36 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
     def onRampUpdate(self, attr):
         pm.gradientControl(attr)
 
-    def getExpectedCount(self, node):
-        mode = node.instancingMode.get()
-        
-        if node.inputCurve.isConnected() and mode == 1:
-            instanceLength = node.instanceLength.get()
-            maxInstancesByLength = node.maxInstancesByLength.get()
-            curveLength = pm.PyNode(node.inputCurve.inputs()[0]).length()
-            return min(maxInstancesByLength, int(curveLength / instanceLength))
-
-        # InstanceCount attr conflicts with pymel method
-        return node.attr("instanceCount").get()
-
-    def onInstanceCountChanged(self, nodeName):
-
-        return
+    def updateDimming(self, nodeName, attr):
 
         if pm.PyNode(nodeName).type() == kPluginNodeName:
 
             node = pm.PyNode(nodeName)
-            expectedCount = self.getExpectedCount(node)
-            connectedElements = node.outputTranslation.numConnectedElements()
+            instanced = node.isInstanced()
+            hasInputTransform = node.inputTransform.isConnected()
+            hasInputCurve = node.inputCurve.isConnected()
 
-            # Only instance if we are missing elements
-            if connectedElements < expectedCount:
-
-                if node.inputTransform.isConnected():
-
-                    inputTransform = pm.PyNode(node.inputTransform.inputs()[0])
-                    instanceCount = expectedCount - connectedElements
-
-                    instances = []
-
-                    for i in xrange(instanceCount):
-
-                        instance = pm.instance(inputTransform, leaf = False)[0]
-
-                        # Parent instance to transform node
-                        transformNode = node.getParent()
-                        transformNode.addChild(instance)
-
-                        # Transformation connections
-                        node.outputTranslation[connectedElements + i].connect(instance.translate)
-                        node.outputRotation[connectedElements + i].connect(instance.rotate)
-                        node.outputScale[connectedElements + i].connect(instance.scale)
-
-                        # Overrides
-                        instance.overrideEnabled.set(True)
-                        node.instanceDisplayType.connect(instance.overrideDisplayType)
-                        node.instanceBoundingBox.connect(instance.overrideLevelOfDetail)
-
-                        instances.append(instance)
-
-                    # Assign shading group to all instances
-                    pm.sets(node.inputShadingGroup.get(), forceElement=instances)
-
-                    # For some reason it seems to lose focus, so reselect!
-                    pm.select(node)
-            else:
-                
-                connections = node.outputTranslation.outputs()
-                toRemove = connectedElements - expectedCount
-
-                for i in xrange(toRemove):
-                    element = node.outputTranslation[connectedElements - 1 - i]
-                    pm.delete(element.outputs()[0])
+            self.dimControl(nodeName, attr, instanced or (not hasInputCurve) or (not hasInputTransform))
 
     def onInstanceModeChanged(self, nodeName):
-        if pm.PyNode(nodeName).type() == kPluginNodeName:
+        self.updateDimming(nodeName, "instancingMode")
 
-            self.onInstanceCountChanged(nodeName)
+        if pm.PyNode(nodeName).type() == kPluginNodeName:
 
             nodeAttr = pm.PyNode(nodeName + ".instancingMode")
             mode = nodeAttr.get("instancingMode")
-            self.dimControl(nodeName, "instanceLength", mode == 0)
-            self.dimControl(nodeName, "maxInstancesByLength", mode == 0)
-            self.dimControl(nodeName, "instanceCount", mode == 1)
-            # TODO: dim everything if there is no curve or transform
+
+            # If dimmed, do not update dimming
+            if mode == 0:
+                self.dimControl(nodeName, "instanceLength", True)
+                self.dimControl(nodeName, "maxInstancesByLength", True)
+
+                self.updateDimming(nodeName, "instanceCount")
+            else:
+                self.updateDimming(nodeName, "instanceLength")
+                self.updateDimming(nodeName, "maxInstancesByLength")
+                
+                self.dimControl(nodeName, "instanceCount", True)
 
 # Command
 class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
