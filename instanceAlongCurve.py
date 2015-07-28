@@ -33,7 +33,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     inputCurveAttr = OpenMaya.MObject()
     inputTransformAttr = OpenMaya.MObject()
     inputShadingGroupAttr = OpenMaya.MObject()
-    inputTimeAttr = OpenMaya.MObject()
 
     # Instance count related attributes
     instanceCountAttr = OpenMaya.MObject()
@@ -464,9 +463,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     def compute(self, plug, dataBlock):
         try:
-            timeDataHandle = dataBlock.inputValue( instanceAlongCurveLocator.inputTimeAttr )
-            time = timeDataHandle.asTime().value()
-
             curveDataHandle = dataBlock.inputValue(instanceAlongCurveLocator.inputCurveAttr)
             curve = curveDataHandle.asNurbsCurveTransformed()
 
@@ -556,17 +552,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         curveAttributeFn = OpenMaya.MFnTypedAttribute()
         enumFn = OpenMaya.MFnEnumAttribute()
         matrixFn = OpenMaya.MFnTypedAttribute()
-        timeFn = OpenMaya.MFnUnitAttribute()
 
         node.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
         node.addAttribute( node.inputTransformAttr )
 
         node.inputShadingGroupAttr = msgAttributeFn.create("inputShadingGroup", "iSG")    
         node.addAttribute( node.inputShadingGroupAttr )
-
-        # Input time
-        node.inputTimeAttr = timeFn.create("inputTime", "inputTime", OpenMaya.MFnUnitAttribute.kTime)
-        node.addAttribute( node.inputTimeAttr )
 
         # Input curve transform
         node.inputCurveAttr = curveAttributeFn.create( 'inputCurve', 'curve', OpenMaya.MFnData.kNurbsCurve)
@@ -642,7 +633,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             node.attributeAffects( rampAttributes.rampRandomAmplitude, affectedAttr)
 
         # Translation affects
-        node.attributeAffects( node.inputTimeAttr, node.outputTranslationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputTranslationAttr.compound )
         node.attributeAffects( node.instanceCountAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.instanceLengthAttr, node.outputTranslationAttr.compound)
@@ -652,7 +642,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         rampAttributeAffects(node.positionRampAttr, node.outputTranslationAttr.compound)
 
         # Rotation affects
-        node.attributeAffects( node.inputTimeAttr, node.outputRotationAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputRotationAttr.compound )
         node.attributeAffects( node.instanceCountAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.instanceLengthAttr, node.outputRotationAttr.compound)
@@ -665,7 +654,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         rampAttributeAffects(node.rotationRampAttr, node.outputRotationAttr.compound)
 
         # Scale affects
-        node.attributeAffects( node.inputTimeAttr, node.outputScaleAttr.compound )
         node.attributeAffects( node.inputCurveAttr, node.outputScaleAttr.compound )
         node.attributeAffects( node.instanceCountAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.instanceLengthAttr, node.outputScaleAttr.compound)
