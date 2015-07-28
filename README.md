@@ -8,6 +8,11 @@ Maya Plugin for interactive instancing of shapes along curves.
 
 ### Features
 ![Features1](iac_1.gif)
+* Instance an object by count or by distance between instances.
+* Various rotation modes, including chain mode.
+* Customize how instances look.
+* Customize the instances transformation by ramps evaluated in curve parameter space.
+* Randomize instances transformations
 
 ### Installation
 
