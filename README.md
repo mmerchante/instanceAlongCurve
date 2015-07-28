@@ -20,3 +20,6 @@ To use the plugin, select a curve and the shape you want to instance and go to E
 ### Documentation
 
 In progress.
+
+#### Known issues
+* When batch rendering, if the node has complex logic depending on time, it may be necessary to bake the node and its children. In some renderers, the node is not being evaluated each frame.
