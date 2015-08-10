@@ -1,4 +1,4 @@
-Instance Along Curve
+Changelog
 ====================
 
 ### Current Version: 1.0.1
