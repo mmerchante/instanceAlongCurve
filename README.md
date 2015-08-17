@@ -28,3 +28,4 @@ In progress.
 
 #### Known issues
 * When batch rendering, if the node has complex logic depending on time, it may be necessary to bake the node and its children. In some renderers, the node is not being evaluated each frame.
+* When the instancing mode is by distance, any change on the curve length is not immediatly reflected until a change on the instancing attributes is made.
