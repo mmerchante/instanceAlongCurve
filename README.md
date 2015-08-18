@@ -6,6 +6,8 @@ Instance Along Curve
 ### About
 Maya Plugin for interactive instancing of shapes along curves.
 
+Short demo at: [Youtube](https://www.youtube.com/watch?v=vRDSNR7xqEs)
+
 ### Features
 ![Features1](iac_1.gif)
 * Instance an object by count or by distance between instances.
