@@ -1,5 +1,5 @@
 ![](http://mmerchante.github.io/instanceAlongCurve/resources/header.png)
-Instance Along Curve
+[Instance Along Curve](http://mmerchante.github.io/instanceAlongCurve)
 ==================
 
 Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node called instanceAlongCurveLocator, which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
