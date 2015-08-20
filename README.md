@@ -3,10 +3,15 @@
 Instance Along Curve
 ==================
 
-### About
-Maya Plugin for interactive instancing of shapes along curves.
+Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node called instanceAlongCurveLocator, which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
 
 Short demo at: [Youtube](https://www.youtube.com/watch?v=k4i_dZjxVr0)
+
+#### Difference with other approaches
+
+Because it is a DG node that is recomputed each time Maya considers necessary, there is no need to execute manual scripts or hacks or custom windows to update the instances. Also, it is very efficient in updating each instance, because every relevant instance attribute is connected to the locator, and only recomputes what is needed.
+
+However, Maya makes instancing objects from a plugin node **very** difficult, so there are some known limitations.
 
 ### Features
 * It's a dependency graph node, so it works gracefully with Maya environment.
