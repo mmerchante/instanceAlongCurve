@@ -1,3 +1,4 @@
+![](http://mmerchante.github.io/instanceAlongCurve/resources/header.png)
 Instance Along Curve
 ==================
 
