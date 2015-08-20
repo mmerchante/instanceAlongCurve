@@ -29,7 +29,12 @@
       </header>
       <section>
         <h1>
+
 <a id="instance-along-curve" class="anchor" href="#instance-along-curve" aria-hidden="true"><span class="octicon octicon-link"></span></a>Instance Along Curve</h1>
+
+<video id="header" preload autoplay loop>
+  <source src="resources/header.webm" type='video/webm; codecs="vp8, vorbis"' />
+</video>
 
 <p>Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node called instanceAlongCurveLocator, which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.</p>
 
@@ -38,7 +43,7 @@
 <p>Short demo at: <a href="https://www.youtube.com/watch?v=k4i_dZjxVr0">Youtube</a></p>
 
 <h4>
-<a id="difference-with-other-approaches" class="anchor" href="#difference-with-other-approaches" aria-hidden="true"><span class="octicon octicon-link"></span></a>Difference with other approaches</h4>
+<a id="difference-with-other-approaches" class="anchor" href="#difference-with-other-approaches" aria-hidden="true"><span class="octicon octicon-link"></span></a>Differences with other approaches</h4>
 
 <p>Because it is a DG node that is recomputed each time Maya considers necessary, there is no need to execute manual scripts or hacks or custom windows to update the instances. Also, it is very efficient in updating each instance, because every relevant instance attribute is connected to the locator, and only recomputes what is needed.</p>
 
