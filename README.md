@@ -22,7 +22,7 @@ Short demo at: [Youtube](https://www.youtube.com/watch?v=k4i_dZjxVr0)
 Save instanceAlongCurve.py under MAYA_PLUG_IN_PATH
  * (Linux) $HOME/maya/plug-ins
  * (Mac OS X) $HOME/Library/Preferences/Autodesk/maya/plug-ins
- * (Windows) \Users\<username>\Documents\maya\plug-ins
+ * (Windows) \\Users\\\<**username**\>\\Documents\\maya\\plug-ins
 
 ### Use
 To use the plugin, select a curve and the shape you want to instance and go to Edit->Instance Along Curve. You can save it as a Shelf Button if you want.
