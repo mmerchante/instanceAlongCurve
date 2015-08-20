@@ -1,4 +1,4 @@
-![](http://mmerchante.github.io/instanceAlongCurve/resources/header.png)
+[![](http://mmerchante.github.io/instanceAlongCurve/resources/header.png)](https://www.youtube.com/watch?v=k4i_dZjxVr0)
 [Instance Along Curve](http://mmerchante.github.io/instanceAlongCurve)
 ==================
 
