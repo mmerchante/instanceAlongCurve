@@ -1,5 +1,3 @@
-
-![Screenshot](screenshot.png)
 Instance Along Curve
 ==================
 
