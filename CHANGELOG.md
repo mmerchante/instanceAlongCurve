@@ -1,7 +1,11 @@
 Changelog
 ====================
 
-### Current Version: 1.0.1
+### Current Version: 1.0.2
+
+### 1.0.2
+
+- Fixed plugin not working with curves created with the EP curve tool
 
 ### 1.0.1
 

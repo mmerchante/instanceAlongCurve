@@ -13,11 +13,7 @@ kPluginNodeName = 'instanceAlongCurveLocator'
 kPluginNodeClassify = 'utility/general'
 kPluginNodeId = OpenMaya.MTypeId( 0x55555 ) 
 
-# Ideas
-#   - New orientation mode: follow last position. This is cool for random position or position ramp cases
-#   - Random meshes
-
-# InstanceAlongCurve v1.0.1
+# InstanceAlongCurve v1.0.2
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -348,11 +344,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 rampValue = self.getRampValueAtPosition(rampValues, i, count)
 
                 param = curveFn.findParamFromLength(curveLength * (i / float(count)))
+
+                # EP curves **really** dont like param at 0.0 (crashes)
+                if param == 0.0:
+                    param += 0.001
+
                 curveFn.getPointAtParam(param, point)
 
-                normal = curveFn.normal(param).normal()
-                tangent = curveFn.tangent(param).normal()
-                bitangent = (normal ^ tangent).normal()
+                normal = curveFn.normal(param)
+                tangent = curveFn.tangent(param)
+                bitangent = (normal ^ tangent)
 
                 twistNormal = normal * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
                 twistBitangent = bitangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
@@ -428,9 +429,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 param = curveFn.findParamFromLength(curveLength * (i / float(count)))
                 rot = OpenMaya.MQuaternion()
 
-                normal = curveFn.normal(param).normal()
-                tangent = curveFn.tangent(param).normal()
-                bitangent = (normal ^ tangent).normal()
+                # EP curves **really** dont like param at 0.0 (crashes)
+                if param == 0.0:
+                    param += 0.001
+
+                normal = curveFn.normal(param)
+                tangent = curveFn.tangent(param)
+                bitangent = (normal ^ tangent)
             
                 if rotMode == 1:
                     rot = inputTransformRotation; # No realtime preview - use an inputRotation for that?
@@ -558,7 +563,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         msgAttributeFn = OpenMaya.MFnMessageAttribute()
         curveAttributeFn = OpenMaya.MFnTypedAttribute()
         enumFn = OpenMaya.MFnEnumAttribute()
-        matrixFn = OpenMaya.MFnTypedAttribute()
 
         node.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
         node.addAttribute( node.inputTransformAttr )
