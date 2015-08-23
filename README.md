@@ -13,14 +13,15 @@ Because it is a DG node that is recomputed each time Maya considers necessary, t
 However, Maya makes instancing objects from a plugin node **very** difficult, so there are some known limitations.
 
 ### Features
-* It's a dependency graph node, so it works gracefully with Maya environment.
+* It's a dependency graph node, so it works gracefully with the Maya environment.
 * Instance an object by count or by distance between instances.
 * Various rotation modes, including chain mode.
-* Customize how instances look.
 * Customize the instances transformation by ramps evaluated in curve parameter space.
-* Randomize instances transformations
-* Portable
-* User friendly, highly flexible
+* Customize the ramps' offset with keys or expressions for animations.
+* Customize how instances look in viewport.
+* Randomize instances transformations.
+* Portable.
+* User friendly, highly flexible.
 
 ### Installation
 Save instanceAlongCurve.py under MAYA_PLUG_IN_PATH
