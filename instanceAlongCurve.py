@@ -325,10 +325,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
         return instanceCountPlug.asInt()
 
+    def getParamOffset(self):
+        p = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.distOffsetAttr)
+        return p.asFloat()
+
     def getRandomizedValue(self, random, randomAmplitude, value):
         return (random.random() * 2.0 - 1.0) * randomAmplitude + value
 
-    def updateInstancePositions(self, curveFn, dataBlock, count):
+    def updateInstancePositions(self, curveFn, dataBlock, count, distOffset ):
 
             point = OpenMaya.MPoint()
             curveLength = curveFn.length()
@@ -343,7 +347,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                 rampValue = self.getRampValueAtPosition(rampValues, i, count)
 
-                param = curveFn.findParamFromLength(curveLength * (i / float(count)))
+                dist = curveLength * (i / float(count)) + distOffset
+                #normalize
+                if( dist > 0.0 ):
+                    while( dist > curveLength ):
+                        dist = dist - curveLength
+                elif( dist < 0.0 ):
+                    while( dist < 0.0 ):
+                        dist = dist + curveLength
+
+                param = curveFn.findParamFromLength( dist )
 
                 # EP curves **really** dont like param at 0.0 (crashes)
                 if param == 0.0:
@@ -404,7 +417,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             scaleArrayHandle.setAllClean()
             scaleArrayHandle.setClean()
 
-    def updateInstanceRotations(self, curveFn, dataBlock, count):
+    def updateInstanceRotations(self, curveFn, dataBlock, count, distOffset ):
             point = OpenMaya.MPoint()
             curveLength = curveFn.length()
             rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
@@ -426,7 +439,17 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                 rampValue = self.getRampValueAtPosition(rampValues, i, count)
  
-                param = curveFn.findParamFromLength(curveLength * (i / float(count)))
+                dist = curveLength * (i / float(count)) + distOffset
+                #normalize
+                if( dist > 0.0 ):
+                    while( dist > curveLength ):
+                        dist = dist - curveLength
+                elif( dist < 0.0 ):
+                    while( dist < 0.0 ):
+                        dist = dist + curveLength
+
+                param = curveFn.findParamFromLength( dist )
+
                 rot = OpenMaya.MQuaternion()
 
                 # EP curves **really** dont like param at 0.0 (crashes)
@@ -482,12 +505,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 curveFn = OpenMaya.MFnNurbsCurve(curve)
 
                 instanceCount = self.getInstanceCountByMode()
+                distOffset = self.getParamOffset()
 
                 if plug == instanceAlongCurveLocator.outputTranslationAttr.compound:
-                    self.updateInstancePositions(curveFn, dataBlock, instanceCount)
+                    self.updateInstancePositions(curveFn, dataBlock, instanceCount, distOffset)
 
                 if plug == instanceAlongCurveLocator.outputRotationAttr.compound:
-                    self.updateInstanceRotations(curveFn, dataBlock, instanceCount)
+                    self.updateInstanceRotations(curveFn, dataBlock, instanceCount, distOffset)
 
                 if plug == instanceAlongCurveLocator.outputScaleAttr.compound:
                     self.updateInstanceScale(curveFn, dataBlock, instanceCount)
@@ -582,6 +606,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setConnectable( False )
         node.addAttribute( node.instanceCountAttr)
 
+        ## curve parameter start offset
+        node.distOffsetAttr = nAttr.create("distOffset", "pOffset", OpenMaya.MFnNumericData.kFloat, 0.0)
+        node.addAttribute( node.distOffsetAttr )
+
         ## Max instances when defined by instance length
         node.maxInstancesByLengthAttr = nAttr.create("maxInstancesByLength", "mibl", OpenMaya.MFnNumericData.kInt, 50)
         nAttr.setMin(0)
@@ -649,6 +677,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instanceLengthAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.instancingModeAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputTranslationAttr.compound)
+        node.attributeAffects( node.distOffsetAttr, node.outputTranslationAttr.compound )
 
         rampAttributeAffects(node.positionRampAttr, node.outputTranslationAttr.compound)
 
@@ -659,6 +688,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instancingModeAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.orientationModeAttr, node.outputRotationAttr.compound)
+        node.attributeAffects( node.distOffsetAttr, node.outputRotationAttr.compound )
 
         node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
 
@@ -670,8 +700,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instanceLengthAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.instancingModeAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputScaleAttr.compound)
+        node.attributeAffects( node.distOffsetAttr, node.outputScaleAttr.compound )
 
         rampAttributeAffects(node.scaleRampAttr, node.outputScaleAttr.compound)
+
 
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
@@ -730,6 +762,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceModeChanged)
             self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceModeChanged)
             self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceModeChanged)
+            self.addControl("distOffset", label="Initial Position Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "distOffset"))
             
             self.addSeparator()
 
