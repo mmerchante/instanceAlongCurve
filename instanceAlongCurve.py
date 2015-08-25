@@ -356,17 +356,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                     while( dist < 0.0 ):
                         dist = dist + curveLength
 
-                param = curveFn.findParamFromLength( dist )
-
                 # EP curves **really** dont like param at 0.0 (crashes)
-                if param == 0.0:
-                    param += 0.001
-
+                param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.001 )
                 curveFn.getPointAtParam(param, point)
 
-                normal = curveFn.normal(param)
-                tangent = curveFn.tangent(param)
-                bitangent = (normal ^ tangent)
+                try:
+                    normal = curveFn.normal(param)
+                    tangent = curveFn.tangent(param)
+                    bitangent = (normal ^ tangent)
+                except:
+                    print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
 
                 twistNormal = normal * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
                 twistBitangent = bitangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
@@ -448,17 +447,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                     while( dist < 0.0 ):
                         dist = dist + curveLength
 
-                param = curveFn.findParamFromLength( dist )
+                # EP curves **really** dont like param at 0.0 (crashes)
+                param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.002 )
 
                 rot = OpenMaya.MQuaternion()
-
-                # EP curves **really** dont like param at 0.0 (crashes)
-                if param == 0.0:
-                    param += 0.001
-
-                normal = curveFn.normal(param)
-                tangent = curveFn.tangent(param)
-                bitangent = (normal ^ tangent)
+                try:
+                    normal = curveFn.normal(param)
+                    tangent = curveFn.tangent(param)
+                    bitangent = (normal ^ tangent)
+                except:
+                    print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
             
                 if rotMode == 1:
                     rot = inputTransformRotation; # No realtime preview - use an inputRotation for that?
