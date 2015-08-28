@@ -16,6 +16,7 @@ However, Maya makes instancing objects from a plugin node **very** difficult, so
 * It's a dependency graph node, so it works gracefully with the Maya environment.
 * Instance an object by count or by distance between instances.
 * Various rotation modes, including chain mode.
+* Curve distance offset, useful for tank treads.
 * Customize the instances transformation by ramps evaluated in curve parameter space.
 * Customize the ramps' offset with keys or expressions for animations.
 * Customize how instances look in viewport.
