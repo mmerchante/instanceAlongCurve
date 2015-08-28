@@ -1,7 +1,14 @@
 Changelog
 ====================
 
-### Current Version: 1.0.2
+### Current Version: 1.0.3
+
+### 1.0.3
+
+- Added distance offset, contributed by MirageYM
+- Fixed normalization of ramps axes
+
+Compatibility issues: ramp amplitudes may need to be adjusted.
 
 ### 1.0.2
 

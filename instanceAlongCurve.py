@@ -13,7 +13,7 @@ kPluginNodeName = 'instanceAlongCurveLocator'
 kPluginNodeClassify = 'utility/general'
 kPluginNodeId = OpenMaya.MTypeId( 0x55555 ) 
 
-# InstanceAlongCurve v1.0.2
+# InstanceAlongCurve v1.0.3
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -65,6 +65,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             else:
                 self.rampAxis = dataBlock.inputValue(rampAttr.rampAxis.compound).asVector()              
 
+    # Ramps base offset
+    distOffsetAttr = OpenMaya.MObject()
+
     # Ramp attributes
     positionRampAttr = RampAttributes()
     rotationRampAttr = RampAttributes()
@@ -77,12 +80,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     def __init__(self):
         OpenMayaMPx.MPxLocatorNode.__init__(self)
-
-    # This method is not being called?
-    # def __del__(self):
-    #     print "CALLBACK: " + str(callbackId)
-    #     OpenMaya.MNodeMessage.removeCallback(self.callbackId)
-    #     OpenMayaMPx.MPxLocatorNode.__del__(self)
 
     def postConstructor(self):
         OpenMaya.MFnDependencyNode(self.thisMObject()).setName("instanceAlongCurveLocatorShape#")
@@ -346,24 +343,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             for i in xrange(min(count, translateArrayHandle.elementCount())):
 
                 rampValue = self.getRampValueAtPosition(rampValues, i, count)
+                dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
 
-                dist = curveLength * (i / float(count)) + distOffset
-                #normalize
-                if( dist > 0.0 ):
-                    while( dist > curveLength ):
-                        dist = dist - curveLength
-                elif( dist < 0.0 ):
-                    while( dist < 0.0 ):
-                        dist = dist + curveLength
-
-                # EP curves **really** dont like param at 0.0 (crashes)
+                # EP curves **really** dont like param at 0.0 
                 param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.001 )
                 curveFn.getPointAtParam(param, point)
 
                 try:
-                    normal = curveFn.normal(param)
-                    tangent = curveFn.tangent(param)
-                    bitangent = (normal ^ tangent)
+                    normal = curveFn.normal(param).normal()
+                    tangent = curveFn.tangent(param).normal()
+                    bitangent = (normal ^ tangent).normal()
                 except:
                     print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
 
@@ -438,28 +427,21 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                 rampValue = self.getRampValueAtPosition(rampValues, i, count)
  
-                dist = curveLength * (i / float(count)) + distOffset
-                #normalize
-                if( dist > 0.0 ):
-                    while( dist > curveLength ):
-                        dist = dist - curveLength
-                elif( dist < 0.0 ):
-                    while( dist < 0.0 ):
-                        dist = dist + curveLength
+                dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
 
-                # EP curves **really** dont like param at 0.0 (crashes)
+                # EP curves **really** dont like param at 0.0
                 param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.002 )
 
                 rot = OpenMaya.MQuaternion()
                 try:
-                    normal = curveFn.normal(param)
-                    tangent = curveFn.tangent(param)
-                    bitangent = (normal ^ tangent)
+                    normal = curveFn.normal(param).normal()
+                    tangent = curveFn.tangent(param).normal()
+                    bitangent = (normal ^ tangent).normal()
                 except:
                     print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
             
                 if rotMode == 1:
-                    rot = inputTransformRotation; # No realtime preview - use an inputRotation for that?
+                    rot = inputTransformRotation;
                 elif rotMode == 2:
                     rot = startOrientation.rotateTo(normal)
                 elif rotMode == 3:
@@ -975,10 +957,9 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                     # (pymel) create a locator and make it the parent
                     locator = pm.createNode('locator', ss=True, p=newNodeTransformName)
 
-                    # Show AE because instancing logic depends on update...
+                    # Show AE
                     mel.eval("openAEWindow")
 
-                    # Enable drawing overrides
                     instanceCountPlug = newNodeFn.findPlug("instanceCount", False)
                     instanceCountPlug.setInt(10)
                     
