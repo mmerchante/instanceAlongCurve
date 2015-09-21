@@ -29,12 +29,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             self.y = OpenMaya.MObject()
             self.z = OpenMaya.MObject()
 
-    class CurveAxisDataAttribute(object):
+    class CurveAxisHandleAttribute(object):
 
         def __init__(self):
             self.compound = OpenMaya.MObject()
-            self.curveParameter = OpenMaya.MObject()
-            self.curveAxis = OpenMaya.MObject() # The curve axis in the specified parameter
+            self.parameter = OpenMaya.MObject()
+            self.axis = OpenMaya.MObject() # The curve axis in the specified parameter
 
     # Input attributes
     inputCurveAttr = OpenMaya.MObject()
@@ -48,7 +48,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     maxInstancesByLengthAttr = OpenMaya.MObject()
 
     # Curve axis data, to be manipulated by user
-    curveAxisDataAttr = CurveAxisDataAttribute()
+    curveAxisHandleAttr = CurveAxisHandleAttribute()
 
     displayTypeAttr = OpenMaya.MObject()
     bboxAttr = OpenMaya.MObject()
@@ -579,34 +579,34 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         cls.addCompoundVector3Attribute(rampAttributes.rampAxis, attributeName + "RampAxis", unitType, False, True, defaultAxisValue)
 
     @classmethod
-    def addCurveAxisDataAttribute(cls, curveAxisData, attributeName, defaultAxisValue):
+    def addCurveAxisHandleAttribute(cls, curveAxisHandleAttr, attributeName, defaultAxisValue):
 
         # Schematic view of compound attribute:
-        # curveData[]
-        #   curveDataParameter
-        #   curveDataCurveAxis
-        #       curveDataCurveAxisX
-        #       curveDataCurveAxisY
-        #       curveDataCurveAxisZ
+        # curveAxisHandle[]
+        #   curveAxisHandleParameter
+        #   curveAxisHandleAxis
+        #       curveAxisHandleAxisX
+        #       curveAxisHandleAxisY
+        #       curveAxisHandleAxisZ
 
         nAttr = OpenMaya.MFnNumericAttribute()
         cmpAttr = OpenMaya.MFnCompoundAttribute()
 
-        curveAxisData.curveParameter = nAttr.create(attributeName + "Parameter", attributeName + "Parameter", OpenMaya.MFnNumericData.kDouble, 0.0)
+        curveAxisHandleAttr.parameter = nAttr.create(attributeName + "Parameter", attributeName + "Parameter", OpenMaya.MFnNumericData.kDouble, 0.0)
         nAttr.setWritable( True )
-        cls.addAttribute(curveAxisData.curveParameter)
+        cls.addAttribute(curveAxisHandleAttr.parameter)
 
-        cls.addCompoundVector3Attribute(curveAxisData.curveAxis, attributeName + "CurveAxis", OpenMaya.MFnUnitAttribute.kAngle, False, True, defaultAxisValue)
+        cls.addCompoundVector3Attribute(curveAxisHandleAttr.axis, attributeName + "Axis", OpenMaya.MFnUnitAttribute.kAngle, False, True, defaultAxisValue)
 
         # Build compound array attribute
-        curveAxisData.compound = cmpAttr.create(attributeName, attributeName)
-        cmpAttr.addChild(curveAxisData.curveParameter)
-        cmpAttr.addChild(curveAxisData.curveAxis.compound)
+        curveAxisHandleAttr.compound = cmpAttr.create(attributeName, attributeName)
+        cmpAttr.addChild(curveAxisHandleAttr.parameter)
+        cmpAttr.addChild(curveAxisHandleAttr.axis.compound)
         cmpAttr.setWritable( True )
         cmpAttr.setArray( True )
         cmpAttr.setUsesArrayDataBuilder( True )
 
-        cls.addAttribute(curveAxisData.compound)
+        cls.addAttribute(curveAxisHandleAttr.compound)
 
     @staticmethod
     def nodeInitializer():
@@ -698,7 +698,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(1.0, 1.0, 1.0))
 
-        node.addCurveAxisDataAttribute(node.curveAxisDataAttr, "curveData", OpenMaya.MVector(0.0,0.0,0.0))
+        node.addCurveAxisHandleAttribute(node.curveAxisHandleAttr, "curveAxisHandle", OpenMaya.MVector(0.0,0.0,0.0))
 
         def rampAttributeAffects(rampAttributes, affectedAttr):
             node.attributeAffects( rampAttributes.ramp, affectedAttr)
@@ -708,7 +708,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             node.attributeAffects( rampAttributes.rampRandomAmplitude, affectedAttr)
 
         # Curve Axis affects, for manipulator
-        node.attributeAffects( node.inputCurveAttr, node.curveAxisDataAttr.compound )
+        node.attributeAffects( node.inputCurveAttr, node.curveAxisHandleAttr.compound )
 
         # Translation affects
         node.attributeAffects( node.inputCurveAttr, node.outputTranslationAttr.compound )
@@ -1065,6 +1065,8 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
     def __init__(self):
         OpenMayaMPx.MPxManipContainer.__init__(self)
 
+        self.nodeFn = OpenMaya.MFnDependencyNode()
+
     @staticmethod
     def nodeCreator():
         return OpenMayaMPx.asMPxPtr( instanceAlongCurveLocatorManip() )
@@ -1075,32 +1077,77 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 
     def createChildren(self):
         self.manipCount = 5
-        self.pointManipList = []
-        self.rotateManipList = []
 
-        print "Creating children!"
-
-        # TODO: here, precalculate curve data, because array plug size can change later
+        # List of tuples
+        self.manipHandleList = []
 
         for i in xrange(self.manipCount):
-            self.pointManipList.append(self.addPointOnCurveManip("pointCurveManip" + str(i), "pointCurve" + str(i)))
-            self.rotateManipList.append(self.addRotateManip("rotateManip" + str(i), "rotate" + str(i)))
+            pointOnCurveManip = self.addPointOnCurveManip("pointCurveManip" + str(i), "pointCurve" + str(i))
+            rotateManip = self.addRotateManip("rotateManip" + str(i), "rotate" + str(i))
+            freePointTriadManip = self.addFreePointTriadManip("freePointTriadManip" + str(i), "freePointTriad" + str(i))
+            self.manipHandleList.append((pointOnCurveManip, rotateManip, freePointTriadManip))
 
     def connectToDependNode(self, node):
-        nodeFn = OpenMaya.MFnDependencyNode(node)
-        
-        curvePlug = nodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr)
 
+        self.nodeFn = OpenMaya.MFnDependencyNode(node)
+        curvePlug = self.nodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr)        
+        curveAxisHandleArrayPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
+
+        # TODO: here, precalculate curve data, because array plug size can change later
+        # read current curveAxisHandle data
+        # cache it in a temporary array
+        # interpolate data for new plug size
+        # [...]
+
+        # Now build and connect all plugs
         for i in xrange(self.manipCount):
-            fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.pointManipList[i])
-            fnCurvePoint.connectToCurvePlug(curvePlug)
-            fnCurvePoint.setParameter(float(i) / float(self.manipCount))
 
-            fnRotate = OpenMayaUI.MFnRotateManip(self.rotateManipList[i])
-            fnRotate.displayWithNode(fnCurvePoint.object())
+            # Handle data
+            curveAxisHandlePlug = curveAxisHandleArrayPlug.elementByLogicalIndex(i)
+            curveParameterPlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
+            curveAxisPlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.axis.compound)
+
+            fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
+            fnCurvePoint.connectToCurvePlug(curvePlug)
+            fnCurvePoint.connectToParamPlug(curveParameterPlug)
+            # fnCurvePoint.setParameter(float(i) / float(self.manipCount))
+
+            fnRotate = OpenMayaUI.MFnRotateManip(self.manipHandleList[i][1])
+            fnRotate.connectToRotationPlug(curveAxisPlug)
+            rotateManipIndex = fnRotate.rotationCenterIndex()
+            self.addPlugToManipConversion(rotateManipIndex)
+
+            fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(self.manipHandleList[i][2])
+            fnfreePointTriad.setDrawArrowHead(False)
+            pointIndex = fnfreePointTriad.pointIndex()
+            self.addPlugToManipConversion(pointIndex)
 
         self.finishAddingManips()        
         OpenMayaMPx.MPxManipContainer.connectToDependNode(self, node)
+
+    def plugToManipConversion(self, manipIndex):
+
+        # TODO: map manipIndex to callback in a map?
+        # Else, looking for data is not very efficient
+
+        rotationCenter = OpenMaya.MPoint(0.0, 0.0, 0.0)
+
+        # Find the manipulator to relocate
+        for i in xrange(self.manipCount):
+            fnRotate = OpenMayaUI.MFnRotateManip(self.manipHandleList[i][1])
+            fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(self.manipHandleList[i][2])
+            fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
+
+            if fnRotate.rotationCenterIndex() == manipIndex:
+                rotationCenter = fnCurvePoint.curvePoint()
+            elif fnfreePointTriad.pointIndex() == manipIndex:
+                rotationCenter = fnCurvePoint.curvePoint()
+
+        numData = OpenMaya.MFnNumericData()
+        numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
+        numData.setData3Double(rotationCenter.x, rotationCenter.y, rotationCenter.z)
+        manipData = OpenMayaUI.MManipData(numDataObj)
+        return manipData
 
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject, "mmerchante", "1.0.4" )
