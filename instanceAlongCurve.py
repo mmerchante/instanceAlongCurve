@@ -5,15 +5,19 @@ import traceback
 import maya.mel as mel
 import pymel.core as pm
 import maya.OpenMaya as OpenMaya
+import maya.OpenMayaUI as OpenMayaUI
 import maya.OpenMayaMPx as OpenMayaMPx
 import maya.OpenMayaRender as OpenMayaRender
 
 kPluginCmdName = "instanceAlongCurve"
+kPluginCtxCmdName = "instanceAlongCurveCtx"
 kPluginNodeName = 'instanceAlongCurveLocator'
+kPluginManipNodeName = 'instanceAlongCurveLocatorManip'
 kPluginNodeClassify = 'utility/general'
 kPluginNodeId = OpenMaya.MTypeId( 0x55555 ) 
+kPluginNodeManipId = OpenMaya.MTypeId( 0x55556 ) 
 
-# InstanceAlongCurve v1.0.3
+# InstanceAlongCurve v1.0.4
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -25,6 +29,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             self.y = OpenMaya.MObject()
             self.z = OpenMaya.MObject()
 
+    class CurveAxisDataAttribute(object):
+
+        def __init__(self):
+            self.compound = OpenMaya.MObject()
+            self.curveParameter = OpenMaya.MObject()
+            self.curveAxis = OpenMaya.MObject() # The curve axis in the specified parameter
+
     # Input attributes
     inputCurveAttr = OpenMaya.MObject()
     inputTransformAttr = OpenMaya.MObject()
@@ -35,6 +46,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     instancingModeAttr = OpenMaya.MObject()
     instanceLengthAttr = OpenMaya.MObject()
     maxInstancesByLengthAttr = OpenMaya.MObject()
+
+    # Curve axis data, to be manipulated by user
+    curveAxisDataAttr = CurveAxisDataAttribute()
 
     displayTypeAttr = OpenMaya.MObject()
     bboxAttr = OpenMaya.MObject()
@@ -508,6 +522,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     @classmethod
     def addCompoundVector3Attribute(cls, compoundAttribute, attributeName, unitType, arrayAttr, inputAttr, defaultValue):
 
+        # Schematic view of compound attribute:
+        # compoundAttribute[?]
+        #   compoundAttributeX
+        #   compoundAttributeY
+        #   compoundAttributeZ
+
         unitAttr = OpenMaya.MFnUnitAttribute()
         nAttr = OpenMaya.MFnNumericAttribute()
 
@@ -535,7 +555,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     @classmethod
     def addRampAttributes(cls, rampAttributes, attributeName, unitType, defaultAxisValue):
 
-        unitAttr = OpenMaya.MFnUnitAttribute()
+        # Not a compound attribute, just adds them all to the node
+        
         nAttr = OpenMaya.MFnNumericAttribute()
 
         rampAttributes.ramp = OpenMaya.MRampAttribute.createCurveRamp(attributeName + "Ramp", attributeName + "Ramp")
@@ -557,8 +578,41 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         cls.addCompoundVector3Attribute(rampAttributes.rampAxis, attributeName + "RampAxis", unitType, False, True, defaultAxisValue)
 
+    @classmethod
+    def addCurveAxisDataAttribute(cls, curveAxisData, attributeName, defaultAxisValue):
+
+        # Schematic view of compound attribute:
+        # curveData[]
+        #   curveDataParameter
+        #   curveDataCurveAxis
+        #       curveDataCurveAxisX
+        #       curveDataCurveAxisY
+        #       curveDataCurveAxisZ
+
+        nAttr = OpenMaya.MFnNumericAttribute()
+        cmpAttr = OpenMaya.MFnCompoundAttribute()
+
+        curveAxisData.curveParameter = nAttr.create(attributeName + "Parameter", attributeName + "Parameter", OpenMaya.MFnNumericData.kDouble, 0.0)
+        nAttr.setWritable( True )
+        cls.addAttribute(curveAxisData.curveParameter)
+
+        cls.addCompoundVector3Attribute(curveAxisData.curveAxis, attributeName + "CurveAxis", OpenMaya.MFnUnitAttribute.kAngle, False, True, defaultAxisValue)
+
+        # Build compound array attribute
+        curveAxisData.compound = cmpAttr.create(attributeName, attributeName)
+        cmpAttr.addChild(curveAxisData.curveParameter)
+        cmpAttr.addChild(curveAxisData.curveAxis.compound)
+        cmpAttr.setWritable( True )
+        cmpAttr.setArray( True )
+        cmpAttr.setUsesArrayDataBuilder( True )
+
+        cls.addAttribute(curveAxisData.compound)
+
     @staticmethod
     def nodeInitializer():
+
+        # Associate the node with its aim manipulator
+        OpenMayaMPx.MPxManipContainer.addToManipConnectTable(kPluginNodeId)
 
         # To make things more readable
         node = instanceAlongCurveLocator
@@ -644,12 +698,17 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(1.0, 1.0, 1.0))
 
+        node.addCurveAxisDataAttribute(node.curveAxisDataAttr, "curveData", OpenMaya.MVector(0.0,0.0,0.0))
+
         def rampAttributeAffects(rampAttributes, affectedAttr):
             node.attributeAffects( rampAttributes.ramp, affectedAttr)
             node.attributeAffects( rampAttributes.rampOffset, affectedAttr)
             node.attributeAffects( rampAttributes.rampAmplitude, affectedAttr)
             node.attributeAffects( rampAttributes.rampAxis.compound, affectedAttr)
             node.attributeAffects( rampAttributes.rampRandomAmplitude, affectedAttr)
+
+        # Curve Axis affects, for manipulator
+        node.attributeAffects( node.inputCurveAttr, node.curveAxisDataAttr.compound )
 
         # Translation affects
         node.attributeAffects( node.inputCurveAttr, node.outputTranslationAttr.compound )
@@ -683,36 +742,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.distOffsetAttr, node.outputScaleAttr.compound )
 
         rampAttributeAffects(node.scaleRampAttr, node.outputScaleAttr.compound)
-
-
-def initializePlugin( mobject ):
-    mplugin = OpenMayaMPx.MFnPlugin( mobject )
-    try:
-        # Register command
-        mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
-
-        if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
-            mplugin.addMenuItem("Instance Along Curve", "MayaWindow|mainEditMenu", kPluginCmdName, "")
-
-            # Register AE template
-            pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
-
-        # Register node
-        mplugin.registerNode( kPluginNodeName, kPluginNodeId, instanceAlongCurveLocator.nodeCreator,
-                              instanceAlongCurveLocator.nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
-    except:
-        sys.stderr.write('Failed to register plugin instanceAlongCurve. stack trace: \n')
-        sys.stderr.write(traceback.format_exc())
-        raise
-    
-def uninitializePlugin( mobject ):
-    mplugin = OpenMayaMPx.MFnPlugin( mobject )
-    try:
-        mplugin.deregisterCommand( kPluginCmdName )
-        mplugin.deregisterNode( kPluginNodeId )
-    except:
-        sys.stderr.write( 'Failed to deregister plugin instanceAlongCurve')
-        raise
 
 ###############
 # AE TEMPLATE #
@@ -974,3 +1003,137 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
     @staticmethod
     def cmdCreator():
         return OpenMayaMPx.asMPxPtr( instanceAlongCurveCommand() )
+
+# class iacToolCommand(OpenMayaMPx.MPxToolCommand):
+
+#     def __init__(self):
+#         return OpenMayaMPx.MPxToolCommand.__init__(self)
+
+#     @staticmethod
+#     def cmdCreator():
+#         return OpenMayaMPx.asMPxPtr(iacToolCommand())
+
+#     def doIt(self, args):
+#         print "DO ET"
+
+#     def cancel(self):
+#         return OpenMayaMPx.MPxToolCommand.cancel(self)
+
+#     def finalize(self):
+#         command = OpenMaya.MArgList()
+#         command.addArg("iacToolCmd")
+#         return OpenMayaMPx.MPxToolCommand.doFinalize(self, command)
+
+# # Context creation command
+# class iacContextCommand(OpenMayaMPx.MPxContextCommand):
+
+#     def __init__(self):
+#         OpenMayaMPx.MPxContextCommand.__init__(self)
+
+#     @staticmethod
+#     def cmdCreator():
+#         return OpenMayaMPx.asMPxPtr( iacContextCommand() )
+
+#     def makeObj(self):
+#         print "CREATING CONTEXT"
+#         return OpenMayaMPx.asMPxPtr( iacContext() )
+
+# # Selection Context
+# class iacContext(OpenMayaMPx.MPxSelectionContext):
+
+#     def __init__(self):
+#         OpenMayaMPx.MPxSelectionContext.__init__(self)
+
+#     def toolOnSetup(self, event):
+#         print "CONTEXT TOOL SETUP!"
+#         self.callbackId = OpenMaya.MModelMessage.addCallback( OpenMaya.MModelMessage.kActiveListModified, self.updateManipulators)
+
+#     def toolOffCleanup(self):
+#         OpenMaya.MModelMessage.removeCallback(self.callbackId)
+#         OpenMayaMPx.MPxContext.toolOffCleanup(self)
+  
+#     def updateManipulators(self, clientData):
+#         # clientData.deleteManipulators()
+#         # selectionList = OpenMaya.MSelectionList()
+#         # OpenMaya.MGlobal.getActiveSelectionList(selectionList)
+#         # selectionIter = OpenMaya.MItSelectionList(selectionList)
+
+#         print "Selection callback!"
+
+class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
+
+    def __init__(self):
+        OpenMayaMPx.MPxManipContainer.__init__(self)
+
+    @staticmethod
+    def nodeCreator():
+        return OpenMayaMPx.asMPxPtr( instanceAlongCurveLocatorManip() )
+
+    @staticmethod
+    def nodeInitializer():
+        OpenMayaMPx.MPxManipContainer.initialize()
+
+    def createChildren(self):
+        self.manipCount = 5
+        self.pointManipList = []
+        self.rotateManipList = []
+
+        print "Creating children!"
+
+        # TODO: here, precalculate curve data, because array plug size can change later
+
+        for i in xrange(self.manipCount):
+            self.pointManipList.append(self.addPointOnCurveManip("pointCurveManip" + str(i), "pointCurve" + str(i)))
+            self.rotateManipList.append(self.addRotateManip("rotateManip" + str(i), "rotate" + str(i)))
+
+    def connectToDependNode(self, node):
+        nodeFn = OpenMaya.MFnDependencyNode(node)
+        
+        curvePlug = nodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr)
+
+        for i in xrange(self.manipCount):
+            fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.pointManipList[i])
+            fnCurvePoint.connectToCurvePlug(curvePlug)
+            fnCurvePoint.setParameter(float(i) / float(self.manipCount))
+
+            fnRotate = OpenMayaUI.MFnRotateManip(self.rotateManipList[i])
+            fnRotate.displayWithNode(fnCurvePoint.object())
+
+        self.finishAddingManips()        
+        OpenMayaMPx.MPxManipContainer.connectToDependNode(self, node)
+
+def initializePlugin( mobject ):
+    mplugin = OpenMayaMPx.MFnPlugin( mobject, "mmerchante", "1.0.4" )
+    try:
+        # Register command
+        mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
+        #mplugin.registerContextCommand( kPluginCtxCmdName, iacContextCommand.cmdCreator, "iacToolCmd", iacToolCommand.cmdCreator )
+
+        if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
+            mplugin.addMenuItem("Instance Along Curve", "MayaWindow|mainEditMenu", kPluginCmdName, "")
+
+            # Register AE template
+            pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
+
+        # Register IAC node
+        mplugin.registerNode( kPluginNodeName, kPluginNodeId, instanceAlongCurveLocator.nodeCreator,
+                              instanceAlongCurveLocator.nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
+
+        # Register IAC manip node
+        mplugin.registerNode( kPluginManipNodeName, kPluginNodeManipId, instanceAlongCurveLocatorManip.nodeCreator, instanceAlongCurveLocatorManip.nodeInitializer, OpenMayaMPx.MPxNode.kManipContainer )
+
+    except:
+        sys.stderr.write('Failed to register plugin instanceAlongCurve. stack trace: \n')
+        sys.stderr.write(traceback.format_exc())
+        raise
+    
+def uninitializePlugin( mobject ):
+    mplugin = OpenMayaMPx.MFnPlugin( mobject )
+    try:
+        mplugin.deregisterCommand( kPluginCmdName )
+        # mplugin.deregisterContextCommand( kPluginCtxCmdName, "iacToolCmd" )
+        mplugin.deregisterNode( kPluginNodeId )
+        mplugin.deregisterNode( kPluginNodeManipId )
+    except:
+        sys.stderr.write( 'Failed to deregister plugin instanceAlongCurve')
+        raise
