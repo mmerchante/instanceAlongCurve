@@ -1004,62 +1004,6 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
     def cmdCreator():
         return OpenMayaMPx.asMPxPtr( instanceAlongCurveCommand() )
 
-# class iacToolCommand(OpenMayaMPx.MPxToolCommand):
-
-#     def __init__(self):
-#         return OpenMayaMPx.MPxToolCommand.__init__(self)
-
-#     @staticmethod
-#     def cmdCreator():
-#         return OpenMayaMPx.asMPxPtr(iacToolCommand())
-
-#     def doIt(self, args):
-#         print "DO ET"
-
-#     def cancel(self):
-#         return OpenMayaMPx.MPxToolCommand.cancel(self)
-
-#     def finalize(self):
-#         command = OpenMaya.MArgList()
-#         command.addArg("iacToolCmd")
-#         return OpenMayaMPx.MPxToolCommand.doFinalize(self, command)
-
-# # Context creation command
-# class iacContextCommand(OpenMayaMPx.MPxContextCommand):
-
-#     def __init__(self):
-#         OpenMayaMPx.MPxContextCommand.__init__(self)
-
-#     @staticmethod
-#     def cmdCreator():
-#         return OpenMayaMPx.asMPxPtr( iacContextCommand() )
-
-#     def makeObj(self):
-#         print "CREATING CONTEXT"
-#         return OpenMayaMPx.asMPxPtr( iacContext() )
-
-# # Selection Context
-# class iacContext(OpenMayaMPx.MPxSelectionContext):
-
-#     def __init__(self):
-#         OpenMayaMPx.MPxSelectionContext.__init__(self)
-
-#     def toolOnSetup(self, event):
-#         print "CONTEXT TOOL SETUP!"
-#         self.callbackId = OpenMaya.MModelMessage.addCallback( OpenMaya.MModelMessage.kActiveListModified, self.updateManipulators)
-
-#     def toolOffCleanup(self):
-#         OpenMaya.MModelMessage.removeCallback(self.callbackId)
-#         OpenMayaMPx.MPxContext.toolOffCleanup(self)
-  
-#     def updateManipulators(self, clientData):
-#         # clientData.deleteManipulators()
-#         # selectionList = OpenMaya.MSelectionList()
-#         # OpenMaya.MGlobal.getActiveSelectionList(selectionList)
-#         # selectionIter = OpenMaya.MItSelectionList(selectionList)
-
-#         print "Selection callback!"
-
 class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 
     def __init__(self):
@@ -1078,8 +1022,15 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
     def createChildren(self):
         self.manipCount = 5
 
+        # TODO: here, precalculate curve data, because array plug size can change later
+        # read current curveAxisHandle data
+        # cache it in a temporary array
+        # interpolate data for new plug size
+        # [...]
+
         # List of tuples
         self.manipHandleList = []
+        self.manipIndexCallbacks = {}
 
         for i in xrange(self.manipCount):
             pointOnCurveManip = self.addPointOnCurveManip("pointCurveManip" + str(i), "pointCurve" + str(i))
@@ -1093,13 +1044,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         curvePlug = self.nodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr)        
         curveAxisHandleArrayPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
 
-        # TODO: here, precalculate curve data, because array plug size can change later
-        # read current curveAxisHandle data
-        # cache it in a temporary array
-        # interpolate data for new plug size
-        # [...]
-
-        # Now build and connect all plugs
+        # Build and connect all plugs
         for i in xrange(self.manipCount):
 
             # Handle data
@@ -1110,42 +1055,71 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
             fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
             fnCurvePoint.connectToCurvePlug(curvePlug)
             fnCurvePoint.connectToParamPlug(curveParameterPlug)
-            # fnCurvePoint.setParameter(float(i) / float(self.manipCount))
+            fnCurvePoint.setParameter(float(i) / float(self.manipCount))
 
             fnRotate = OpenMayaUI.MFnRotateManip(self.manipHandleList[i][1])
             fnRotate.connectToRotationPlug(curveAxisPlug)
+            fnRotate.setRotateMode(OpenMayaUI.MFnRotateManip.kObjectSpace) # Visualize better the rotations
             rotateManipIndex = fnRotate.rotationCenterIndex()
             self.addPlugToManipConversion(rotateManipIndex)
+            self.manipIndexCallbacks[rotateManipIndex] = (self.rotationConversion, i) # Store index value 
 
             fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(self.manipHandleList[i][2])
             fnfreePointTriad.setDrawArrowHead(False)
             pointIndex = fnfreePointTriad.pointIndex()
             self.addPlugToManipConversion(pointIndex)
+            self.manipIndexCallbacks[pointIndex] = (self.freePointTriadConversion, i) # Store index value 
 
         self.finishAddingManips()        
         OpenMayaMPx.MPxManipContainer.connectToDependNode(self, node)
 
-    def plugToManipConversion(self, manipIndex):
+    def rotationConversion(self, manipTuple):
 
-        # TODO: map manipIndex to callback in a map?
-        # Else, looking for data is not very efficient
+        fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(manipTuple[0])
+        fnRotate = OpenMayaUI.MFnRotateManip(manipTuple[1])
+        fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(manipTuple[2])
 
-        rotationCenter = OpenMaya.MPoint(0.0, 0.0, 0.0)
-
-        # Find the manipulator to relocate
-        for i in xrange(self.manipCount):
-            fnRotate = OpenMayaUI.MFnRotateManip(self.manipHandleList[i][1])
-            fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(self.manipHandleList[i][2])
-            fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
-
-            if fnRotate.rotationCenterIndex() == manipIndex:
-                rotationCenter = fnCurvePoint.curvePoint()
-            elif fnfreePointTriad.pointIndex() == manipIndex:
-                rotationCenter = fnCurvePoint.curvePoint()
+        rotationCenter = fnCurvePoint.curvePoint()
 
         numData = OpenMaya.MFnNumericData()
         numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
         numData.setData3Double(rotationCenter.x, rotationCenter.y, rotationCenter.z)
+        manipData = OpenMayaUI.MManipData(numDataObj)
+        return manipData
+
+    def freePointTriadConversion(self, manipTuple):
+
+        fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(manipTuple[0])
+        fnRotate = OpenMayaUI.MFnRotateManip(manipTuple[1])
+        fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(manipTuple[2])
+
+        # Update triad manip, dirty hack
+        rotation = fnRotate.rotateXYZValue(fnRotate.rotationIndex())
+
+        fnfreePointTriad.setTranslation(OpenMaya.MVector(fnCurvePoint.curvePoint()), OpenMaya.MSpace.kWorld)
+        fnfreePointTriad.setRotation(rotation)
+
+        numData = OpenMaya.MFnNumericData()
+        numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
+
+        # Because the manipulator is being translated, the center has to be its origin
+        numData.setData3Double(0.0, 0.0, 0.0)
+        manipData = OpenMayaUI.MManipData(numDataObj)
+        return manipData
+
+    def plugToManipConversion(self, manipIndex):
+
+        rotationCenter = OpenMaya.MPoint(0.0, 0.0, 0.0)
+
+        if manipIndex in self.manipIndexCallbacks:
+            curveHandleIndex = self.manipIndexCallbacks[manipIndex][1]
+            return self.manipIndexCallbacks[manipIndex][0](self.manipHandleList[curveHandleIndex])
+
+        print "Manip callback not set; returning invalid data!"
+
+        numData = OpenMaya.MFnNumericData()
+        numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
+        numData.setData3Double(0.0, 0.0, 0.0)
         manipData = OpenMayaUI.MManipData(numDataObj)
         return manipData
 
@@ -1154,7 +1128,6 @@ def initializePlugin( mobject ):
     try:
         # Register command
         mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
-        #mplugin.registerContextCommand( kPluginCtxCmdName, iacContextCommand.cmdCreator, "iacToolCmd", iacToolCommand.cmdCreator )
 
         if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
             mplugin.addMenuItem("Instance Along Curve", "MayaWindow|mainEditMenu", kPluginCmdName, "")
@@ -1178,7 +1151,6 @@ def uninitializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
         mplugin.deregisterCommand( kPluginCmdName )
-        # mplugin.deregisterContextCommand( kPluginCtxCmdName, "iacToolCmd" )
         mplugin.deregisterNode( kPluginNodeId )
         mplugin.deregisterNode( kPluginNodeManipId )
     except:
