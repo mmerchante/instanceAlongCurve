@@ -419,70 +419,147 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             scaleArrayHandle.setAllClean()
             scaleArrayHandle.setClean()
 
-    def updateInstanceRotations(self, curveFn, dataBlock, count, distOffset ):
-            point = OpenMaya.MPoint()
-            curveLength = curveFn.length()
-            rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
-            startOrientation = dataBlock.outputValue(instanceAlongCurveLocator.inputOrientationAxisAttr.compound).asVector().normal()
+    def getSortedCurveAxisArray(self, curveAxisHandleArray, count):
+        axisHandles = []
 
-            # Deterministic random
-            random.seed(count)
-            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.rotationRampAttr, True)
+        for i in xrange(curveAxisHandleArray.elementCount()):
+            curveAxisHandleArray.jumpToArrayElement(i)
+            parameterHandle = curveAxisHandleArray.inputValue().child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
+            rotationHandle = curveAxisHandleArray.inputValue().child(instanceAlongCurveLocator.curveAxisHandleAttr.axis.compound)
+            axisHandles.append((i, parameterHandle.asDouble(), rotationHandle.asVector()))
 
-            rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()
+        def getKey(item):
+            return item[1]
 
-            inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
-            inputTransformRotation = OpenMaya.MQuaternion()
+        return sorted(axisHandles, key=getKey)
 
-            if inputTransformPlug.isConnected():
-                self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
+    # TODO: cache this data to prevent recalculating when there is no manipulator being updated
+    def getRotationForParam(self, param, axisHandlesSorted, curveForm, curveMaxParam):
 
-            for i in xrange(min(count, rotationArrayHandle.elementCount())):
+        indexRange = (-1, -1)
+        wrapAround = not (curveForm is OpenMaya.MFnNurbsCurve.kOpen)
 
-                rampValue = self.getRampValueAtPosition(rampValues, i, count)
- 
-                dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
+        # Find the range of indices that make up this curve segment
+        for i in xrange(len(axisHandlesSorted)):
 
-                # EP curves **really** dont like param at 0.0
-                param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.002 )
+            # TODO: could use a binary search
+            if param < axisHandlesSorted[i][1]:
 
-                rot = OpenMaya.MQuaternion()
-                try:
-                    normal = curveFn.normal(param).normal()
-                    tangent = curveFn.tangent(param).normal()
-                    bitangent = (normal ^ tangent).normal()
-                except:
-                    print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
+                if i > 0:
+                    indexRange = (i - 1, i)
+                    break
+                elif wrapAround:
+                    indexRange = (len(axisHandlesSorted) - 1, 0)
+                    break
+                else:
+                    indexRange = (0, 0)
+                    break
+
+        # Edge case
+        if indexRange[0] == -1 and indexRange[1] == -1 and len(axisHandlesSorted) > 0:
+            if wrapAround:
+                indexRange = (len(axisHandlesSorted) - 1, 0)
+            else:
+                indexRange = (len(axisHandlesSorted) - 1, len(axisHandlesSorted) - 1)
             
-                if rotMode == 1:
-                    rot = inputTransformRotation;
-                elif rotMode == 2:
-                    rot = startOrientation.rotateTo(normal)
-                elif rotMode == 3:
-                    rot = startOrientation.rotateTo(tangent)
-                elif rotMode == 4:
-                    rot = startOrientation.rotateTo(tangent)
-                    
-                    if i % 2 == 1:
-                        rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
+        # Now find the lerp value based on the range
+        if indexRange[0] > -1 and indexRange[1] > -1:
+            minParam = axisHandlesSorted[indexRange[0]][1]
+            maxParam = axisHandlesSorted[indexRange[1]][1]
 
-                twistNormal = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x                
-                twistNormal = OpenMaya.MQuaternion(twistNormal * 0.0174532925, normal) # DegToRad
+            minAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[0]][2]).asQuaternion()
+            maxAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[1]][2]).asQuaternion()
 
-                twistTangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-                twistTangent = OpenMaya.MQuaternion(twistTangent * 0.0174532925, tangent) # DegToRad
+            if(math.fabs(minParam - maxParam) > 0.001):
 
-                twistBitangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
-                twistBitangent = OpenMaya.MQuaternion(twistBitangent * 0.0174532925, bitangent) # DegToRad
+                if minParam > maxParam and wrapAround:
 
-                rot = (rot * twistNormal * twistTangent * twistBitangent).asEulerRotation().asVector()
+                    if param < maxParam:
+                        param = param + curveMaxParam
 
-                rotationArrayHandle.jumpToArrayElement(i)
-                rotationHandle = rotationArrayHandle.outputValue()
-                rotationHandle.set3Double(rot.x, rot.y, rot.z)
+                    maxParam = maxParam + curveMaxParam
+                
+                t = min(max((param - minParam) / (maxParam - minParam), 0.0), 1.0)
 
-            rotationArrayHandle.setAllClean()
-            rotationArrayHandle.setClean()
+                return quaternionSlerp(minAxis, maxAxis, t)
+
+            return minAxis
+
+        return OpenMaya.MQuaternion()
+
+    def updateInstanceRotations(self, curveFn, dataBlock, count, distOffset ):
+        point = OpenMaya.MPoint()
+        curveLength = curveFn.length()
+        rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
+        startOrientation = dataBlock.outputValue(instanceAlongCurveLocator.inputOrientationAxisAttr.compound).asVector().normal()
+
+        # Deterministic random
+        random.seed(count)
+        rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.rotationRampAttr, True)
+
+        rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()
+
+        curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
+        axisHandlesSorted = self.getSortedCurveAxisArray(curveAxisHandleArray, count)
+
+        inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
+        inputTransformRotation = OpenMaya.MQuaternion()
+
+        # First, map parameter 
+
+        if inputTransformPlug.isConnected():
+            self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
+
+        for i in xrange(min(count, rotationArrayHandle.elementCount())):
+
+            rampValue = self.getRampValueAtPosition(rampValues, i, count)
+
+            dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
+
+            # EP curves **really** dont like param at 0.0
+            param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.002 )
+
+            rot = OpenMaya.MQuaternion()
+            try:
+                normal = curveFn.normal(param).normal()
+                tangent = curveFn.tangent(param).normal()
+                bitangent = (normal ^ tangent).normal()
+            except:
+                print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
+        
+            if rotMode == 1:
+                rot = inputTransformRotation;
+            elif rotMode == 2:
+                rot = startOrientation.rotateTo(normal)
+            elif rotMode == 3:
+                rot = startOrientation.rotateTo(tangent)
+            elif rotMode == 4:
+                rot = startOrientation.rotateTo(tangent)
+                
+                if i % 2 == 1:
+                    rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
+
+            twistNormal = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x                
+            twistNormal = OpenMaya.MQuaternion(twistNormal * 0.0174532925, normal) # DegToRad
+
+            twistTangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
+            twistTangent = OpenMaya.MQuaternion(twistTangent * 0.0174532925, tangent) # DegToRad
+
+            twistBitangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+            twistBitangent = OpenMaya.MQuaternion(twistBitangent * 0.0174532925, bitangent) # DegToRad
+
+            rot = (rot * twistNormal * twistTangent * twistBitangent).asEulerRotation().asVector()
+
+            # TODO: add twists to custom mode
+            if rotMode == 5:
+                rot = self.getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length())).asEulerRotation()
+
+            rotationArrayHandle.jumpToArrayElement(i)
+            rotationHandle = rotationArrayHandle.outputValue()
+            rotationHandle.set3Double(rot.x, rot.y, rot.z)
+
+        rotationArrayHandle.setAllClean()
+        rotationArrayHandle.setClean()
 
     def isBounded(self):
         return True
@@ -681,6 +758,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         enumFn.addField( "Normal", 2 );
         enumFn.addField( "Tangent", 3 );
         enumFn.addField( "Chain", 4 );
+        enumFn.addField( "Custom", 5 );
         enumFn.setDefault("Tangent")
         node.addAttribute( node.orientationModeAttr )
 
@@ -730,6 +808,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.distOffsetAttr, node.outputRotationAttr.compound )
 
         node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
+
+        node.attributeAffects( node.curveAxisHandleAttr.compound, node.outputRotationAttr.compound)
 
         rampAttributeAffects(node.rotationRampAttr, node.outputRotationAttr.compound)
 
@@ -1008,7 +1088,6 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 
     def __init__(self):
         OpenMayaMPx.MPxManipContainer.__init__(self)
-
         self.nodeFn = OpenMaya.MFnDependencyNode()
 
     @staticmethod
@@ -1066,6 +1145,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 
             fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(self.manipHandleList[i][2])
             fnfreePointTriad.setDrawArrowHead(False)
+            fnfreePointTriad.setSnapMode(False)
             pointIndex = fnfreePointTriad.pointIndex()
             self.addPlugToManipConversion(pointIndex)
             self.manipIndexCallbacks[pointIndex] = (self.freePointTriadConversion, i) # Store index value 
@@ -1156,3 +1236,33 @@ def uninitializePlugin( mobject ):
     except:
         sys.stderr.write( 'Failed to deregister plugin instanceAlongCurve')
         raise
+
+
+### UTILS
+
+# Taken from: https://groups.google.com/forum/#!topic/python_inside_maya/Dvkj1OCFcX0
+def quaternionSlerp(a, b, t):
+    cos = quaternionDot(a, b)
+
+    if cos < 0.0:
+        cos = quaternionDot(a, b.negateIt())
+
+    theta = math.acos(cos)
+    sin = math.sin(theta)
+
+    if sin > 0.001:
+        w1 = math.sin((1.0 - t) * theta) / sin
+        w2 = math.sin(t * theta) / sin
+    else:
+        w1 = 1.0 - t
+        w2 = t
+
+    aa = OpenMaya.MQuaternion(a)
+    bb = OpenMaya.MQuaternion(b)
+    aa.scaleIt(w1)
+    bb.scaleIt(w2)
+
+    return aa + bb
+
+def quaternionDot(q1, q2):
+    return (q1.x * q2.x) + (q1.y * q2.y) + (q1.z * q2.z) + (q1.w * q2.w)
