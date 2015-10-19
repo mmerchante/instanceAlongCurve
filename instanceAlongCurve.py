@@ -49,6 +49,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Curve axis data, to be manipulated by user
     curveAxisHandleAttr = CurveAxisHandleAttribute()
+    curveAxisHandleCountAttr = OpenMaya.MObject()
 
     displayTypeAttr = OpenMaya.MObject()
     bboxAttr = OpenMaya.MObject()
@@ -103,7 +104,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     # Find original SG to reassign it to instance
     def getShadingGroup(self):
         inputSGPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputShadingGroupAttr)
-        sgNode = self.getSingleSourceObjectFromPlug(inputSGPlug)
+        sgNode = getSingleSourceObjectFromPlug(inputSGPlug)
 
         if sgNode is not None and sgNode.hasFn(OpenMaya.MFn.kSet):
             return OpenMaya.MFnSet(sgNode)
@@ -279,22 +280,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             sys.stderr.write('Failed trying to update instances. stack trace: \n')
             sys.stderr.write(traceback.format_exc())
 
-    def getSingleSourceObjectFromPlug(self, plug):
-
-        if plug.isConnected():
-            # Get connected input plugs
-            connections = OpenMaya.MPlugArray()
-            plug.connectedTo(connections, True, False)
-
-            # Find input transform
-            if connections.length() == 1:
-                return connections[0].node()
-
-        return None
-
     def getInputTransformFn(self):
         inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
-        transform = self.getSingleSourceObjectFromPlug(inputTransformPlug)
+        transform = getSingleSourceObjectFromPlug(inputTransformPlug)
 
         # Get Fn from a DAG path to get the world transformations correctly
         if transform is not None and transform.hasFn(OpenMaya.MFn.kTransform):
@@ -307,7 +295,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     def getCurveFn(self):
         inputCurvePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputCurveAttr)
-        curve = self.getSingleSourceObjectFromPlug(inputCurvePlug)
+        curve = getSingleSourceObjectFromPlug(inputCurvePlug)
 
         # Get Fn from a DAG path to get the world transformations correctly
         if curve is not None:
@@ -778,6 +766,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         node.addCurveAxisHandleAttribute(node.curveAxisHandleAttr, "curveAxisHandle", OpenMaya.MVector(0.0,0.0,0.0))
 
+        ## Input handle count
+        node.curveAxisHandleCountAttr = nAttr.create("curveAxisHandleCount", "curveAxisHandleCount", OpenMaya.MFnNumericData.kInt, 5)
+        nAttr.setMin(1)
+        nAttr.setSoftMax(100)
+        nAttr.setChannelBox( False )
+        nAttr.setConnectable( False )
+        node.addAttribute( node.curveAxisHandleCountAttr)
+
         def rampAttributeAffects(rampAttributes, affectedAttr):
             node.attributeAffects( rampAttributes.ramp, affectedAttr)
             node.attributeAffects( rampAttributes.rampOffset, affectedAttr)
@@ -787,6 +783,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         # Curve Axis affects, for manipulator
         node.attributeAffects( node.inputCurveAttr, node.curveAxisHandleAttr.compound )
+        node.attributeAffects( node.curveAxisHandleCountAttr, node.curveAxisHandleAttr.compound )
 
         # Translation affects
         node.attributeAffects( node.inputCurveAttr, node.outputTranslationAttr.compound )
@@ -847,6 +844,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.beginScrollLayout()
             self.beginLayout("Instance Along Curve Settings", collapse=0)
 
+            # Base controls
             self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
             self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceModeChanged)
             self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceModeChanged)
@@ -855,16 +853,26 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             
             self.addSeparator()
 
-            self.addControl("orientationMode", label="Orientation Mode", changeCommand=lambda nodeName: self.updateDimming(nodeName, "orientationMode"))
+            # Orientation controls
+            self.addControl("orientationMode", label="Orientation Mode", changeCommand=lambda nodeName: self.updateOrientationChange(nodeName))
             self.addControl("inputOrientationAxis", label="Orientation Axis", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputOrientationAxis"))
 
             self.addSeparator()
 
+            # Manipulator controls
+            self.addControl("curveAxisHandleCount", label="Manipulator count", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName))
+            
+            self.callCustom(lambda attr: self.buttonNew(nodeName), lambda attr: None, "curveAxisHandleCount")
+
+            self.addSeparator()
+
+            # Instance look controls
             self.addControl("instanceDisplayType", label="Instance Display Type", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceDisplayType"))
             self.addControl("instanceBoundingBox", label="Use bounding box", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceBoundingBox"))
             
             self.addSeparator()
             
+            # Additional info
             self.addControl("inputTransform", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransform"))
             self.addControl("inputShadingGroup", label="Shading Group", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputShadingGroup"))
 
@@ -889,10 +897,24 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.endLayout()
             self.endScrollLayout()
 
+    def buttonNew(self, nodeName):
+        updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName), width=300)
+            
+    def onEditManipulators(self, nodeName):
+        pm.runtime.ShowManipulators()
+
+    # When orientation changes, update related controls...  
+    def updateOrientationChange(self, nodeName):
+        self.updateDimming(nodeName, "orientationMode")
+        self.updateManipCountDimming(nodeName)
+
     def onRampUpdate(self, attr):
         pm.gradientControl(attr)
 
-    def updateDimming(self, nodeName, attr):
+    def updateManipCountDimming(self, nodeName):
+        self.updateDimming(nodeName, "curveAxisHandleCount", pm.PyNode(nodeName).orientationMode.get() == 5)
+
+    def updateDimming(self, nodeName, attr, additionalCondition = True):
 
         if pm.PyNode(nodeName).type() == kPluginNodeName:
 
@@ -901,7 +923,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             hasInputTransform = node.inputTransform.isConnected()
             hasInputCurve = node.inputCurve.isConnected()
 
-            self.dimControl(nodeName, attr, instanced or (not hasInputCurve) or (not hasInputTransform))
+            self.dimControl(nodeName, attr, instanced or (not hasInputCurve) or (not hasInputTransform) or (not additionalCondition))
 
     def onInstanceModeChanged(self, nodeName):
         self.updateDimming(nodeName, "instancingMode")
@@ -1099,17 +1121,31 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         OpenMayaMPx.MPxManipContainer.initialize()
 
     def createChildren(self):
-        self.manipCount = 5
-
-        # TODO: here, precalculate curve data, because array plug size can change later
-        # read current curveAxisHandle data
-        # cache it in a temporary array
-        # interpolate data for new plug size
-        # [...]
 
         # List of tuples
+        self.manipCount = 0
         self.manipHandleList = []
         self.manipIndexCallbacks = {}
+
+        selectedObjects = OpenMaya.MSelectionList()
+        OpenMaya.MGlobal.getActiveSelectionList(selectedObjects)
+
+        # Because we need to know the selected object to manipulate, we cannot manipulate various nodes at once...
+        if selectedObjects.length() != 1:
+            return None
+
+        dagPath = OpenMaya.MDagPath()
+        selectedObjects.getDagPath(0, dagPath)
+        dagPath.extendToShape()
+
+        nodeFn = OpenMaya.MFnDependencyNode(dagPath.node())
+        rotMode = nodeFn.findPlug(instanceAlongCurveLocator.orientationModeAttr).asInt()
+
+        # If the node is not using the custom rotation, prevent the user from breaking it ;)
+        if rotMode != 5:
+            return None
+
+        self.manipCount = nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleCountAttr).asInt()
 
         for i in xrange(self.manipCount):
             pointOnCurveManip = self.addPointOnCurveManip("pointCurveManip" + str(i), "pointCurve" + str(i))
@@ -1123,6 +1159,22 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         curvePlug = self.nodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr)        
         curveAxisHandleArrayPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
 
+        curveFn = OpenMaya.MFnNurbsCurve(getFnFromPlug(curvePlug, OpenMaya.MFn.kNurbsCurve))
+
+        handleCountPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleCountAttr)
+        rotMode = self.nodeFn.findPlug(instanceAlongCurveLocator.orientationModeAttr).asInt()
+
+        if self.manipCount == 0:
+            return None
+
+        # TODO: here, precalculate curve data, because array plug size can change
+        # read current curveAxisHandle data
+        # cache it in a temporary array
+        # interpolate data for new plug size
+
+        # For now, just replace all manips
+        # TODO: this generates a bug somewhere when updating plugs? This may happen when connecting too many manips and then downsizing manip count
+
         # Build and connect all plugs
         for i in xrange(self.manipCount):
 
@@ -1134,7 +1186,9 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
             fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
             fnCurvePoint.connectToCurvePlug(curvePlug)
             fnCurvePoint.connectToParamPlug(curveParameterPlug)
-            fnCurvePoint.setParameter(float(i) / float(self.manipCount))
+            
+            # Set param    
+            curveParameterPlug.setFloat(curveFn.findParamFromLength(curveFn.length() * float(i) / float(self.manipCount)))
 
             fnRotate = OpenMayaUI.MFnRotateManip(self.manipHandleList[i][1])
             fnRotate.connectToRotationPlug(curveAxisPlug)
@@ -1239,6 +1293,36 @@ def uninitializePlugin( mobject ):
 
 
 ### UTILS
+
+def getSingleSourceObjectFromPlug(plug):
+
+    if plug.isConnected():
+        # Get connected input plugs
+        connections = OpenMaya.MPlugArray()
+        plug.connectedTo(connections, True, False)
+
+        # Find input transform
+        if connections.length() == 1:
+            return connections[0].node()
+
+    return None
+
+def getFnFromPlug(plug, fnType):
+    node = getSingleSourceObjectFromPlug(plug)
+
+    # Get Fn from a DAG path to get the world transformations correctly
+    if node is not None:
+        path = OpenMaya.MDagPath()
+        trFn = OpenMaya.MFnDagNode(node)
+        trFn.getPath(path)
+
+        path.extendToShape()
+
+        if path.node().hasFn(fnType):
+            return path
+
+    return None
+
 
 # Taken from: https://groups.google.com/forum/#!topic/python_inside_maya/Dvkj1OCFcX0
 def quaternionSlerp(a, b, t):
