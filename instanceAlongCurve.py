@@ -337,6 +337,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             curveLength = curveFn.length()
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
 
+            rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()            
+            curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
+            axisHandlesSorted = self.getSortedCurveAxisArray(curveAxisHandleArray, count)
+
             # Deterministic random
             random.seed(count)
             rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.positionRampAttr, False)
@@ -348,7 +352,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
 
                 # EP curves **really** dont like param at 0.0 
-                param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.001 )
+                param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.01 )
                 curveFn.getPointAtParam(param, point)
 
                 try:
@@ -356,7 +360,17 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                     tangent = curveFn.tangent(param).normal()
                     bitangent = (normal ^ tangent).normal()
                 except:
-                    print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
+                    # If base cannot be computed, fallback to identity rotation.
+                    # This seems to be a bug in the API...
+                    normal = OpenMaya.MVector(0.0, 1.0, 0.0)
+                    tangent = OpenMaya.MVector(0.0, 0.0, 1.0)
+                    bitangent = OpenMaya.MVector(1.0, 0.0, 0.0)
+
+                if rotMode == 5:
+                    rot = self.getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length()))
+                    normal = normal.rotateBy(rot)
+                    tangent = tangent.rotateBy(rot) 
+                    bitangent = bitangent.rotateBy(rot)
 
                 twistNormal = normal * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
                 twistBitangent = bitangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
@@ -410,7 +424,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     def getSortedCurveAxisArray(self, curveAxisHandleArray, count):
         axisHandles = []
 
-        for i in xrange(curveAxisHandleArray.elementCount()):
+        expectedHandleCount = OpenMaya.MFnDependencyNode(self.thisMObject()).findPlug(instanceAlongCurveLocator.curveAxisHandleCountAttr).asInt()
+
+        for i in xrange(min(expectedHandleCount, curveAxisHandleArray.elementCount())):
             curveAxisHandleArray.jumpToArrayElement(i)
             parameterHandle = curveAxisHandleArray.inputValue().child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
             rotationHandle = curveAxisHandleArray.inputValue().child(instanceAlongCurveLocator.curveAxisHandleAttr.axis.compound)
@@ -455,8 +471,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             minParam = axisHandlesSorted[indexRange[0]][1]
             maxParam = axisHandlesSorted[indexRange[1]][1]
 
-            minAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[0]][2]).asQuaternion()
-            maxAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[1]][2]).asQuaternion()
+            minAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[0]][2])
+            maxAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[1]][2])
 
             if(math.fabs(minParam - maxParam) > 0.001):
 
@@ -469,7 +485,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 
                 t = min(max((param - minParam) / (maxParam - minParam), 0.0), 1.0)
 
-                return quaternionSlerp(minAxis, maxAxis, t)
+                return (minAxis + (maxAxis - minAxis) * t).asQuaternion()
 
             return minAxis
 
@@ -493,8 +509,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
         inputTransformRotation = OpenMaya.MQuaternion()
 
-        # First, map parameter 
-
+        # First, map parameter
         if inputTransformPlug.isConnected():
             self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
 
@@ -505,15 +520,22 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
 
             # EP curves **really** dont like param at 0.0
-            param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.002 )
+            param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.01 )
 
             rot = OpenMaya.MQuaternion()
+
+            # TODO: Optimize this, remove branching, unify rotations... 
             try:
                 normal = curveFn.normal(param).normal()
                 tangent = curveFn.tangent(param).normal()
                 bitangent = (normal ^ tangent).normal()
             except:
-                print 'curveFn normal get error. param:%f/length:%f' % ( param, curveLength )
+                # If base cannot be computed, fallback to identity rotation.
+                # This seems to be a bug in the API...
+                # If you want total control, use manipulators!
+                normal = OpenMaya.MVector(0.0, 1.0, 0.0)
+                tangent = OpenMaya.MVector(0.0, 0.0, 1.0)
+                bitangent = OpenMaya.MVector(1.0, 0.0, 0.0)
         
             if rotMode == 1:
                 rot = inputTransformRotation;
@@ -526,6 +548,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 
                 if i % 2 == 1:
                     rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
+            # TODO: add twists to custom mode
+            if rotMode == 5:
+                rot = self.getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length()))
+                normal = normal.rotateBy(rot)
+                tangent = tangent.rotateBy(rot)
+                bitangent = bitangent.rotateBy(rot)
 
             twistNormal = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x                
             twistNormal = OpenMaya.MQuaternion(twistNormal * 0.0174532925, normal) # DegToRad
@@ -537,10 +565,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             twistBitangent = OpenMaya.MQuaternion(twistBitangent * 0.0174532925, bitangent) # DegToRad
 
             rot = (rot * twistNormal * twistTangent * twistBitangent).asEulerRotation().asVector()
-
-            # TODO: add twists to custom mode
-            if rotMode == 5:
-                rot = self.getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length())).asEulerRotation()
 
             rotationArrayHandle.jumpToArrayElement(i)
             rotationHandle = rotationArrayHandle.outputValue()
@@ -793,6 +817,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.distOffsetAttr, node.outputTranslationAttr.compound )
 
+        node.attributeAffects( node.curveAxisHandleAttr.compound, node.outputTranslationAttr.compound)
+
         rampAttributeAffects(node.positionRampAttr, node.outputTranslationAttr.compound)
 
         # Rotation affects
@@ -817,6 +843,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instancingModeAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.distOffsetAttr, node.outputScaleAttr.compound )
+        
+        node.attributeAffects( node.curveAxisHandleAttr.compound, node.outputScaleAttr.compound)
 
         rampAttributeAffects(node.scaleRampAttr, node.outputScaleAttr.compound)
 
@@ -901,6 +929,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
         updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName), width=300)
             
     def onEditManipulators(self, nodeName):
+        # TODO: unselect first, then select shape
         pm.runtime.ShowManipulators()
 
     # When orientation changes, update related controls...  
@@ -1172,10 +1201,9 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         # cache it in a temporary array
         # interpolate data for new plug size
 
-        # For now, just replace all manips
-        # TODO: this generates a bug somewhere when updating plugs? This may happen when connecting too many manips and then downsizing manip count
-
         # Build and connect all plugs
+        # Note: Previous plugs are still with remnant values (newHandleCount < oldHandleCount),
+        # but because when interpolating we just read the handle count attr, it works.
         for i in xrange(self.manipCount):
 
             # Handle data
@@ -1195,14 +1223,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
             fnRotate.setRotateMode(OpenMayaUI.MFnRotateManip.kObjectSpace) # Visualize better the rotations
             rotateManipIndex = fnRotate.rotationCenterIndex()
             self.addPlugToManipConversion(rotateManipIndex)
-            self.manipIndexCallbacks[rotateManipIndex] = (self.rotationConversion, i) # Store index value 
-
-            fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(self.manipHandleList[i][2])
-            fnfreePointTriad.setDrawArrowHead(False)
-            fnfreePointTriad.setSnapMode(False)
-            pointIndex = fnfreePointTriad.pointIndex()
-            self.addPlugToManipConversion(pointIndex)
-            self.manipIndexCallbacks[pointIndex] = (self.freePointTriadConversion, i) # Store index value 
+            self.manipIndexCallbacks[rotateManipIndex] = (self.rotationConversion, i) # Store index value
 
         self.finishAddingManips()        
         OpenMayaMPx.MPxManipContainer.connectToDependNode(self, node)
@@ -1218,26 +1239,6 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         numData = OpenMaya.MFnNumericData()
         numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
         numData.setData3Double(rotationCenter.x, rotationCenter.y, rotationCenter.z)
-        manipData = OpenMayaUI.MManipData(numDataObj)
-        return manipData
-
-    def freePointTriadConversion(self, manipTuple):
-
-        fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(manipTuple[0])
-        fnRotate = OpenMayaUI.MFnRotateManip(manipTuple[1])
-        fnfreePointTriad = OpenMayaUI.MFnFreePointTriadManip(manipTuple[2])
-
-        # Update triad manip, dirty hack
-        rotation = fnRotate.rotateXYZValue(fnRotate.rotationIndex())
-
-        fnfreePointTriad.setTranslation(OpenMaya.MVector(fnCurvePoint.curvePoint()), OpenMaya.MSpace.kWorld)
-        fnfreePointTriad.setRotation(rotation)
-
-        numData = OpenMaya.MFnNumericData()
-        numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
-
-        # Because the manipulator is being translated, the center has to be its origin
-        numData.setData3Double(0.0, 0.0, 0.0)
         manipData = OpenMayaUI.MManipData(numDataObj)
         return manipData
 
@@ -1293,7 +1294,6 @@ def uninitializePlugin( mobject ):
 
 
 ### UTILS
-
 def getSingleSourceObjectFromPlug(plug):
 
     if plug.isConnected():
@@ -1322,31 +1322,3 @@ def getFnFromPlug(plug, fnType):
             return path
 
     return None
-
-
-# Taken from: https://groups.google.com/forum/#!topic/python_inside_maya/Dvkj1OCFcX0
-def quaternionSlerp(a, b, t):
-    cos = quaternionDot(a, b)
-
-    if cos < 0.0:
-        cos = quaternionDot(a, b.negateIt())
-
-    theta = math.acos(cos)
-    sin = math.sin(theta)
-
-    if sin > 0.001:
-        w1 = math.sin((1.0 - t) * theta) / sin
-        w2 = math.sin(t * theta) / sin
-    else:
-        w1 = 1.0 - t
-        w2 = t
-
-    aa = OpenMaya.MQuaternion(a)
-    bb = OpenMaya.MQuaternion(b)
-    aa.scaleIt(w1)
-    bb.scaleIt(w2)
-
-    return aa + bb
-
-def quaternionDot(q1, q2):
-    return (q1.x * q2.x) + (q1.y * q2.y) + (q1.z * q2.z) + (q1.w * q2.w)
