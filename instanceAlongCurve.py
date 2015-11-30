@@ -9,6 +9,7 @@ import maya.OpenMayaUI as OpenMayaUI
 import maya.OpenMayaMPx as OpenMayaMPx
 import maya.OpenMayaRender as OpenMayaRender
 
+kPluginVersion = "1.1.0"
 kPluginCmdName = "instanceAlongCurve"
 kPluginCtxCmdName = "instanceAlongCurveCtx"
 kPluginNodeName = 'instanceAlongCurveLocator'
@@ -17,7 +18,6 @@ kPluginNodeClassify = 'utility/general'
 kPluginNodeId = OpenMaya.MTypeId( 0x55555 ) 
 kPluginNodeManipId = OpenMaya.MTypeId( 0x55556 ) 
 
-# InstanceAlongCurve v1.0.4
 class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
     # Simple container class for compound vector attributes
@@ -34,7 +34,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         def __init__(self):
             self.compound = OpenMaya.MObject()
             self.parameter = OpenMaya.MObject()
-            self.axis = OpenMaya.MObject() # The curve axis in the specified parameter
+            self.angle = OpenMaya.MObject() # The angle over the tangent axis
 
     # Input attributes
     inputCurveAttr = OpenMaya.MObject()
@@ -366,11 +366,11 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                     tangent = OpenMaya.MVector(0.0, 0.0, 1.0)
                     bitangent = OpenMaya.MVector(1.0, 0.0, 0.0)
 
-                if rotMode == 5:
-                    rot = getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length()))
-                    normal = normal.rotateBy(rot)
-                    tangent = tangent.rotateBy(rot) 
-                    bitangent = bitangent.rotateBy(rot)
+                # if rotMode == 5:
+                #     rot = getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length()))
+                #     normal = normal.rotateBy(rot)
+                #     tangent = tangent.rotateBy(rot) 
+                #     bitangent = bitangent.rotateBy(rot)
 
                 twistNormal = normal * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
                 twistBitangent = bitangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
@@ -421,6 +421,60 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             scaleArrayHandle.setAllClean()
             scaleArrayHandle.setClean()
 
+    # TODO: cache this data to prevent recalculating when there is no manipulator being updated
+    def getRotationForParam(self, param, axisHandlesSorted, curveForm, curveMaxParam):
+
+        indexRange = (-1, -1)
+        wrapAround = not (curveForm is OpenMaya.MFnNurbsCurve.kOpen)
+
+        # Find the range of indices that make up this curve segment
+        for i in xrange(len(axisHandlesSorted)):
+
+            # TODO: could use a binary search
+            if param < axisHandlesSorted[i][1]:
+
+                if i > 0:
+                    indexRange = (i - 1, i)
+                    break
+                elif wrapAround:
+                    indexRange = (len(axisHandlesSorted) - 1, 0)
+                    break
+                else:
+                    indexRange = (0, 0)
+                    break
+
+        # Edge case
+        if indexRange[0] == -1 and indexRange[1] == -1 and len(axisHandlesSorted) > 0:
+            if wrapAround:
+                indexRange = (len(axisHandlesSorted) - 1, 0)
+            else:
+                indexRange = (len(axisHandlesSorted) - 1, len(axisHandlesSorted) - 1)
+            
+        # Now find the lerp value based on the range
+        if indexRange[0] > -1 and indexRange[1] > -1:
+            minParam = axisHandlesSorted[indexRange[0]][1]
+            maxParam = axisHandlesSorted[indexRange[1]][1]
+
+            minAxis = axisHandlesSorted[indexRange[0]][2]
+            maxAxis = axisHandlesSorted[indexRange[1]][2]
+
+            if(math.fabs(minParam - maxParam) > 0.001):
+
+                if minParam > maxParam and wrapAround:
+
+                    if param < maxParam:
+                        param = param + curveMaxParam
+
+                    maxParam = maxParam + curveMaxParam
+                
+                t = min(max((param - minParam) / (maxParam - minParam), 0.0), 1.0)
+
+                return minAxis + (maxAxis - minAxis) * t
+
+            return minAxis
+
+        return 0.0
+
     def updateInstanceRotations(self, curveFn, dataBlock, count, distOffset ):
         point = OpenMaya.MPoint()
         curveLength = curveFn.length()
@@ -439,6 +493,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
         inputTransformRotation = OpenMaya.MQuaternion()
 
+        maxParam = curveFn.findParamFromLength(curveFn.length())
+        curveForm = curveFn.form()
+
         # First, map parameter
         if inputTransformPlug.isConnected():
             self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
@@ -455,6 +512,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             rot = OpenMaya.MQuaternion()
 
             # TODO: Optimize this, remove branching, unify rotations... 
+            # TODO: Remove normal rotation mode, it isnt very useful...
             try:
                 normal = curveFn.normal(param).normal()
                 tangent = curveFn.tangent(param).normal()
@@ -470,25 +528,22 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             if rotMode == 1:
                 rot = inputTransformRotation;
             elif rotMode == 2:
+                # TODO: remove
                 rot = startOrientation.rotateTo(normal)
             elif rotMode == 3:
                 rot = startOrientation.rotateTo(tangent)
             elif rotMode == 4:
+                # TODO: make it optional
                 rot = startOrientation.rotateTo(tangent)
                 
                 if i % 2 == 1:
                     rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
+            elif rotMode == 5:
 
-            # TODO: add twists to custom mode
-            if rotMode == 5:
-                rot = getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length())).asEulerRotation()
-                normal = normal.rotateBy(rot)
-                tangent = tangent.rotateBy(rot)
-                bitangent = bitangent.rotateBy(rot)
-
-                rot = OpenMaya.MEulerRotation(normal * rot.x + tangent * rot.y + bitangent * rot.z).asQuaternion()
-
-                # rot = OpenMaya.MEulerRotation(normal * rot.asEulerRotation().asVector()).asQuaternion()
+                # Get the angle from handles, and rotate over tangent axis
+                # TODO: make it optional
+                angle = self.getRotationForParam(param, axisHandlesSorted, curveForm, maxParam)
+                rot = startOrientation.rotateTo(tangent) * OpenMaya.MQuaternion(-angle, tangent)
 
             twistNormal = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x                
             twistNormal = OpenMaya.MQuaternion(twistNormal * 0.0174532925, normal) # DegToRad
@@ -608,10 +663,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         # Schematic view of compound attribute:
         # curveAxisHandle[]
         #   curveAxisHandleParameter
-        #   curveAxisHandleAxis
-        #       curveAxisHandleAxisX
-        #       curveAxisHandleAxisY
-        #       curveAxisHandleAxisZ
+        #   curveAxisHandleAngle
 
         nAttr = OpenMaya.MFnNumericAttribute()
         cmpAttr = OpenMaya.MFnCompoundAttribute()
@@ -620,12 +672,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setWritable( True )
         cls.addAttribute(curveAxisHandleAttr.parameter)
 
-        cls.addCompoundVector3Attribute(curveAxisHandleAttr.axis, attributeName + "Axis", OpenMaya.MFnUnitAttribute.kAngle, False, True, defaultAxisValue)
+        curveAxisHandleAttr.angle = nAttr.create(attributeName + "Angle", attributeName + "Angle", OpenMaya.MFnNumericData.kDouble, 0.0)
+        nAttr.setWritable( True )
+        cls.addAttribute(curveAxisHandleAttr.angle)
+
+        # cls.addCompoundVector3Attribute(curveAxisHandleAttr.axis, attributeName + "Axis", OpenMaya.MFnUnitAttribute.kAngle, False, True, defaultAxisValue)
 
         # Build compound array attribute
         curveAxisHandleAttr.compound = cmpAttr.create(attributeName, attributeName)
         cmpAttr.addChild(curveAxisHandleAttr.parameter)
-        cmpAttr.addChild(curveAxisHandleAttr.axis.compound)
+        cmpAttr.addChild(curveAxisHandleAttr.angle)
         cmpAttr.setWritable( True )
         cmpAttr.setArray( True )
         cmpAttr.setUsesArrayDataBuilder( True )
@@ -1129,13 +1185,9 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         for i in xrange(count):
             plug = plugArray.elementByLogicalIndex(i)
             parameterPlug = plug.child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
-            axisPlug = plug.child(instanceAlongCurveLocator.curveAxisHandleAttr.axis.compound)
+            anglePlug = plug.child(instanceAlongCurveLocator.curveAxisHandleAttr.angle)
 
-            x = axisPlug.child(0).asDouble()
-            y = axisPlug.child(1).asDouble()
-            z = axisPlug.child(2).asDouble()
-
-            axisHandles.append((i, parameterPlug.asDouble(), OpenMaya.MVector(x,y,z)))
+            axisHandles.append((i, parameterPlug.asDouble(), anglePlug.asDouble()))
 
         def getKey(item):
             return item[1]
@@ -1158,8 +1210,6 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         expectedHandleCount = handleCountPlug.asInt()
         actualHandleCount = curveAxisHandleArrayPlug.numElements()
 
-        # rotMode = self.nodeFn.findPlug(instanceAlongCurveLocator.orientationModeAttr).asInt()
-
         axisHandlesSorted = self.getSortedCurveAxisArrayFromPlug(self.nodeFn, actualHandleCount)
 
         # Amount of new handles
@@ -1174,7 +1224,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
             # Handle data
             curveAxisHandlePlug = curveAxisHandleArrayPlug.elementByLogicalIndex(i)
             curveParameterPlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
-            curveAxisPlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.axis.compound)
+            curveAnglePlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.angle)
 
             fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
             fnCurvePoint.connectToCurvePlug(curvePlug)
@@ -1195,19 +1245,26 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
                     pFrom = axisHandlesSorted[handleSegmentIndex][1]
                     pTo = axisHandlesSorted[handleEndSegmendIndex][1]
 
+                    angleFrom = axisHandlesSorted[handleSegmentIndex][2]
+                    angleTo = axisHandlesSorted[handleEndSegmendIndex][2]
+
                     # Wrap around in last segment
                     if handleSegmentIndex + 1 >= actualHandleCount:
                         pTo += maxParam
                     
+                    # Interpolate both parameters and angle...
                     lerpP = pFrom + (pTo - pFrom) * pT
+                    lerpAngle = angleFrom + (angleTo - angleFrom)  * pT
+
                     curveParameterPlug.setFloat(lerpP)
+                    curveAnglePlug.setDouble(lerpAngle)
 
                 else:
                     # Default case... just add them over the curve
                     curveParameterPlug.setFloat(self.curveFn.findParamFromLength(self.curveFn.length() * float(i) / float(self.manipCount)))
 
             fnDisc = OpenMayaUI.MFnDiscManip(self.manipHandleList[i][2])
-            # fnDisc.connectToAnglePlug(curveAxisPlug)
+            fnDisc.connectToAnglePlug(curveAnglePlug)
             discCenterIndex = fnDisc.centerIndex()
             discAxisIndex = fnDisc.axisIndex()
 
@@ -1216,14 +1273,6 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 
             self.manipIndexCallbacks[discCenterIndex] = (self.discCenterConversion, i) # Store index value
             self.manipIndexCallbacks[discAxisIndex] = (self.discAxisConversion, i) # Store index value
-
-            # fnRotate = OpenMayaUI.MFnRotateManip(self.manipHandleList[i][1])
-            # fnRotate.connectToRotationPlug(curveAxisPlug)
-            # fnRotate.setRotateMode(OpenMayaUI.MFnRotateManip.kObjectSpace) # Visualize better the rotations
-            # rotateManipIndex = fnRotate.rotationCenterIndex()
-            # self.addPlugToManipConversion(rotateManipIndex)
-            # self.manipIndexCallbacks[rotateManipIndex] = (self.rotationConversion, i) # Store index value
-
 
         self.finishAddingManips()        
         OpenMayaMPx.MPxManipContainer.connectToDependNode(self, node)
@@ -1253,18 +1302,6 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         manipData = OpenMayaUI.MManipData(numDataObj)
         return manipData
 
-    # def rotationConversion(self, manipTuple):
-
-    #     fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(manipTuple[0])
-
-    #     rotationCenter = fnCurvePoint.curvePoint()
-
-    #     numData = OpenMaya.MFnNumericData()
-    #     numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
-    #     numData.setData3Double(rotationCenter.x, rotationCenter.y, rotationCenter.z)
-    #     manipData = OpenMayaUI.MManipData(numDataObj)
-    #     return manipData
-
     def plugToManipConversion(self, manipIndex):
 
         if manipIndex in self.manipIndexCallbacks:
@@ -1280,7 +1317,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         return manipData
 
 def initializePlugin( mobject ):
-    mplugin = OpenMayaMPx.MFnPlugin( mobject, "mmerchante", "1.0.4" )
+    mplugin = OpenMayaMPx.MFnPlugin( mobject, "mmerchante", kPluginVersion )
     try:
         # Register command
         mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
@@ -1352,64 +1389,10 @@ def getSortedCurveAxisArray(mObject, curveAxisHandleArray, count):
     for i in xrange(min(expectedHandleCount, curveAxisHandleArray.elementCount())):
         curveAxisHandleArray.jumpToArrayElement(i)
         parameterHandle = curveAxisHandleArray.inputValue().child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
-        rotationHandle = curveAxisHandleArray.inputValue().child(instanceAlongCurveLocator.curveAxisHandleAttr.axis.compound)
-        axisHandles.append((i, parameterHandle.asDouble(), rotationHandle.asVector()))
+        angleHandle = curveAxisHandleArray.inputValue().child(instanceAlongCurveLocator.curveAxisHandleAttr.angle)
+        axisHandles.append((i, parameterHandle.asDouble(), angleHandle.asDouble()))
 
     def getKey(item):
         return item[1]
 
     return sorted(axisHandles, key=getKey)
-
-# TODO: cache this data to prevent recalculating when there is no manipulator being updated
-def getRotationForParam(param, axisHandlesSorted, curveForm, curveMaxParam):
-
-    indexRange = (-1, -1)
-    wrapAround = not (curveForm is OpenMaya.MFnNurbsCurve.kOpen)
-
-    # Find the range of indices that make up this curve segment
-    for i in xrange(len(axisHandlesSorted)):
-
-        # TODO: could use a binary search
-        if param < axisHandlesSorted[i][1]:
-
-            if i > 0:
-                indexRange = (i - 1, i)
-                break
-            elif wrapAround:
-                indexRange = (len(axisHandlesSorted) - 1, 0)
-                break
-            else:
-                indexRange = (0, 0)
-                break
-
-    # Edge case
-    if indexRange[0] == -1 and indexRange[1] == -1 and len(axisHandlesSorted) > 0:
-        if wrapAround:
-            indexRange = (len(axisHandlesSorted) - 1, 0)
-        else:
-            indexRange = (len(axisHandlesSorted) - 1, len(axisHandlesSorted) - 1)
-        
-    # Now find the lerp value based on the range
-    if indexRange[0] > -1 and indexRange[1] > -1:
-        minParam = axisHandlesSorted[indexRange[0]][1]
-        maxParam = axisHandlesSorted[indexRange[1]][1]
-
-        minAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[0]][2])
-        maxAxis = OpenMaya.MEulerRotation(axisHandlesSorted[indexRange[1]][2])
-
-        if(math.fabs(minParam - maxParam) > 0.001):
-
-            if minParam > maxParam and wrapAround:
-
-                if param < maxParam:
-                    param = param + curveMaxParam
-
-                maxParam = maxParam + curveMaxParam
-            
-            t = min(max((param - minParam) / (maxParam - minParam), 0.0), 1.0)
-
-            return (minAxis + (maxAxis - minAxis) * t).asQuaternion()
-
-        return minAxis.asQuaternion()
-
-    return OpenMaya.MQuaternion()
