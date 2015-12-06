@@ -927,6 +927,8 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
     
     def onResetManipPositions(self, nodeName):
 
+        # First, show manips to update manip count
+        self.onEditManipulators(nodeName)
         res = pm.confirmDialog( title='Confirm reset positions', message='Are you sure you want to reset the manipulators positions?', button=['Yes','No'], defaultButton='Yes', cancelButton='No', dismissString='No' )
 
         if res == "Yes":
@@ -954,7 +956,9 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
                 pm.runtime.ShowManipulators()
 
     def onResetManipAngles(self, nodeName):
-
+        
+        # First, show manips to update manip count
+        self.onEditManipulators(nodeName)
         res = pm.confirmDialog( title='Confirm reset angles', message='Are you sure you want to reset the manipulators angles?', button=['Yes','No'], defaultButton='Yes', cancelButton='No', dismissString='No' )
 
         if res == "Yes":
@@ -1250,88 +1254,93 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 
     def connectToDependNode(self, node):
 
-        self.nodeFn = OpenMaya.MFnDependencyNode(node)
-        curvePlug = self.nodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr)        
-        curveAxisHandleArrayPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
+        try:
+            self.nodeFn = OpenMaya.MFnDependencyNode(node)
+            curvePlug = self.nodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr)        
+            curveAxisHandleArrayPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
 
-        self.curveFn = OpenMaya.MFnNurbsCurve(getFnFromPlug(curvePlug, OpenMaya.MFn.kNurbsCurve))
-        maxParam = self.curveFn.findParamFromLength(self.curveFn.length())
+            self.curveFn = OpenMaya.MFnNurbsCurve(getFnFromPlug(curvePlug, OpenMaya.MFn.kNurbsCurve))
+            maxParam = self.curveFn.findParamFromLength(self.curveFn.length())
 
-        if self.manipCount == 0:
-            return None
+            if self.manipCount == 0:
+                return None
 
-        handleCountPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleCountAttr)
-        expectedHandleCount = handleCountPlug.asInt()
-        actualHandleCount = curveAxisHandleArrayPlug.numElements()
-        axisHandlesSorted = self.getSortedCurveAxisArrayFromPlug(self.nodeFn, actualHandleCount)
+            handleCountPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleCountAttr)
+            expectedHandleCount = handleCountPlug.asInt()
+            actualHandleCount = curveAxisHandleArrayPlug.numElements()
+            axisHandlesSorted = self.getSortedCurveAxisArrayFromPlug(self.nodeFn, actualHandleCount)
 
-        # Amount of new handles
-        handlesToInit = self.manipCount - actualHandleCount
-        handlesPerSegment = 0
+            # Amount of new handles
+            handlesToInit = self.manipCount - actualHandleCount
+            handlesPerSegment = 0
 
-        if actualHandleCount > 0:
-            handlesPerSegment = max(math.ceil(handlesToInit / float(actualHandleCount)), 1)
+            if actualHandleCount > 0:
+                handlesPerSegment = max(math.ceil(handlesToInit / float(actualHandleCount)), 1)
 
-        # Build and connect all plugs
-        # Note: Previous plugs are still with remnant values (newHandleCount < oldHandleCount),
-        # but because when interpolating we just read the handle count attr, it works.
-        for i in xrange(self.manipCount):
+            # Build and connect all plugs
+            # Note: Previous plugs are still with remnant values (newHandleCount < oldHandleCount),
+            # but because when interpolating we just read the handle count attr, it works.
+            for i in xrange(self.manipCount):
 
-            # Handle data
-            curveAxisHandlePlug = curveAxisHandleArrayPlug.elementByLogicalIndex(i)
-            curveParameterPlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
-            curveAnglePlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.angle)
+                # Handle data
+                curveAxisHandlePlug = curveAxisHandleArrayPlug.elementByLogicalIndex(i)
+                curveParameterPlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.parameter)
+                curveAnglePlug = curveAxisHandlePlug.child(instanceAlongCurveLocator.curveAxisHandleAttr.angle)
 
-            fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
-            fnCurvePoint.connectToCurvePlug(curvePlug)
-            fnCurvePoint.connectToParamPlug(curveParameterPlug)
-            
-            # If we are adding a new handle, we should initialize this handle to some reasonable param/rotation
-            # Otherwise, just keep the previous handle data... it seems the most usable solution
-            if i >= actualHandleCount:
+                fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(self.manipHandleList[i][0])
+                fnCurvePoint.connectToCurvePlug(curvePlug)
+                fnCurvePoint.connectToParamPlug(curveParameterPlug)
+                
+                # If we are adding a new handle, we should initialize this handle to some reasonable param/rotation
+                # Otherwise, just keep the previous handle data... it seems the most usable solution
+                if i >= actualHandleCount:
 
-                if actualHandleCount > 1:
+                    if actualHandleCount > 1:
 
-                    # We distribute these new handles over existing segments, so try to distribute them evenly
-                    handleSegmentIndex = (i - actualHandleCount) % actualHandleCount
-                    handleEndSegmendIndex = (handleSegmentIndex + 1) % actualHandleCount
-                    handleSegmentSubIndex = (i - actualHandleCount) / actualHandleCount
+                        # We distribute these new handles over existing segments, so try to distribute them evenly
+                        handleSegmentIndex = (i - actualHandleCount) % actualHandleCount
+                        handleEndSegmendIndex = (handleSegmentIndex + 1) % actualHandleCount
+                        handleSegmentSubIndex = (i - actualHandleCount) / actualHandleCount
 
-                    pT = float(handleSegmentSubIndex + 1) / float(handlesPerSegment + 1)
-                    pFrom = axisHandlesSorted[handleSegmentIndex][1]
-                    pTo = axisHandlesSorted[handleEndSegmendIndex][1]
+                        pT = float(handleSegmentSubIndex + 1) / float(handlesPerSegment + 1)
+                        pFrom = axisHandlesSorted[handleSegmentIndex][1]
+                        pTo = axisHandlesSorted[handleEndSegmendIndex][1]
 
-                    angleFrom = axisHandlesSorted[handleSegmentIndex][2]
-                    angleTo = axisHandlesSorted[handleEndSegmendIndex][2]
+                        angleFrom = axisHandlesSorted[handleSegmentIndex][2]
+                        angleTo = axisHandlesSorted[handleEndSegmendIndex][2]
 
-                    # Wrap around in last segment
-                    if handleSegmentIndex + 1 >= actualHandleCount:
-                        pTo += maxParam
-                    
-                    # Interpolate both parameters and angle...
-                    lerpP = pFrom + (pTo - pFrom) * pT
-                    lerpAngle = angleFrom + (angleTo - angleFrom)  * pT
+                        # Wrap around in last segment
+                        if handleSegmentIndex + 1 >= actualHandleCount:
+                            pTo += maxParam
+                        
+                        # Interpolate both parameters and angle...
+                        lerpP = pFrom + (pTo - pFrom) * pT
+                        lerpAngle = angleFrom + (angleTo - angleFrom)  * pT
 
-                    curveParameterPlug.setFloat(lerpP)
-                    curveAnglePlug.setDouble(lerpAngle)
+                        curveParameterPlug.setFloat(lerpP)
+                        curveAnglePlug.setDouble(lerpAngle)
 
-                else:
-                    # Default case... just add them over the curve
-                    curveParameterPlug.setFloat(self.curveFn.findParamFromLength(self.curveFn.length() * float(i) / float(self.manipCount)))
+                    else:
+                        # Default case... just add them over the curve
+                        curveParameterPlug.setFloat(self.curveFn.findParamFromLength(self.curveFn.length() * float(i) / float(self.manipCount)))
 
-            fnDisc = OpenMayaUI.MFnDiscManip(self.manipHandleList[i][1])
-            fnDisc.connectToAnglePlug(curveAnglePlug)
-            discCenterIndex = fnDisc.centerIndex()
-            discAxisIndex = fnDisc.axisIndex()
+                fnDisc = OpenMayaUI.MFnDiscManip(self.manipHandleList[i][1])
+                fnDisc.connectToAnglePlug(curveAnglePlug)
+                discCenterIndex = fnDisc.centerIndex()
+                discAxisIndex = fnDisc.axisIndex()
 
-            self.addPlugToManipConversion(discCenterIndex)
-            self.addPlugToManipConversion(discAxisIndex)
+                self.addPlugToManipConversion(discCenterIndex)
+                self.addPlugToManipConversion(discAxisIndex)
 
-            self.manipIndexCallbacks[discCenterIndex] = (self.discCenterConversion, i) # Store index value
-            self.manipIndexCallbacks[discAxisIndex] = (self.discAxisConversion, i) # Store index value
+                self.manipIndexCallbacks[discCenterIndex] = (self.discCenterConversion, i) # Store index value
+                self.manipIndexCallbacks[discAxisIndex] = (self.discAxisConversion, i) # Store index value
 
-        self.finishAddingManips()        
-        OpenMayaMPx.MPxManipContainer.connectToDependNode(self, node)
+            self.finishAddingManips()        
+            OpenMayaMPx.MPxManipContainer.connectToDependNode(self, node)
+
+        except:    
+            sys.stderr.write('Failed trying to connect manipulators. Stack trace: \n')
+            sys.stderr.write(traceback.format_exc())
 
     def discAxisConversion(self, manipTuple):
 
