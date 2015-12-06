@@ -917,8 +917,63 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.endScrollLayout()
 
     def buttonNew(self, nodeName):
-        updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName), width=300)
-            
+
+        # pm.separator( height=5, style='none')
+        pm.rowLayout(numberOfColumns=3, adjustableColumn=1, columnWidth3=(80, 100, 100))
+        updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName))
+
+        pm.button( label='Reset Positions', command=lambda *args: self.onResetManipPositions(nodeName))
+        pm.button( label='Reset Angles', command=lambda *args: self.onResetManipAngles(nodeName))
+    
+    def onResetManipPositions(self, nodeName):
+
+        res = pm.confirmDialog( title='Confirm reset positions', message='Are you sure you want to reset the manipulators positions?', button=['Yes','No'], defaultButton='Yes', cancelButton='No', dismissString='No' )
+
+        if res == "Yes":
+
+            pm.select( clear=True )
+
+            node = pm.PyNode(nodeName)
+            curve = node.inputCurve
+            handles = node.curveAxisHandle
+
+            if len(curve.connections()) == 1:
+
+                curveNode = curve.connections()[0]
+                maxParam = curveNode.findParamFromLength(curveNode.length())
+
+                count = min(node.curveAxisHandleCount.get(), handles.numElements())
+
+                index = 0
+                for h in handles:
+                    if index < count:
+                        h.children()[0].set(index * maxParam / float(count))
+                        index = index + 1
+                        
+                pm.select(nodeName)
+                pm.runtime.ShowManipulators()
+
+    def onResetManipAngles(self, nodeName):
+
+        res = pm.confirmDialog( title='Confirm reset angles', message='Are you sure you want to reset the manipulators angles?', button=['Yes','No'], defaultButton='Yes', cancelButton='No', dismissString='No' )
+
+        if res == "Yes":
+
+            pm.select( clear=True )
+
+            node = pm.PyNode(nodeName)
+            handles = node.curveAxisHandle
+            count = min(node.curveAxisHandleCount.get(), handles.numElements())
+
+            index = 0
+            for h in handles:
+                if index < count:
+                    h.children()[1].set(0.0)
+                    index = index + 1
+
+            pm.select(nodeName)
+            pm.runtime.ShowManipulators()
+
     def onEditManipulators(self, nodeName):
         
         # Unselect first, to trigger rebuilding of manips
@@ -1173,9 +1228,8 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 
         for i in xrange(self.manipCount):
             pointOnCurveManip = self.addPointOnCurveManip("pointCurveManip" + str(i), "pointCurve" + str(i))
-            # rotateManip = self.addRotateManip("rotateManip" + str(i), "rotate" + str(i))
             discManip = self.addDiscManip("discManip" + str(i), "disc" + str(i))
-            self.manipHandleList.append((pointOnCurveManip, None, discManip))
+            self.manipHandleList.append((pointOnCurveManip, discManip))
 
     def getSortedCurveAxisArrayFromPlug(self, nodeFn, count):
 
@@ -1209,12 +1263,14 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         handleCountPlug = self.nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleCountAttr)
         expectedHandleCount = handleCountPlug.asInt()
         actualHandleCount = curveAxisHandleArrayPlug.numElements()
-
         axisHandlesSorted = self.getSortedCurveAxisArrayFromPlug(self.nodeFn, actualHandleCount)
 
         # Amount of new handles
         handlesToInit = self.manipCount - actualHandleCount
-        handlesPerSegment = max(handlesToInit / (actualHandleCount - 1), 1)
+        handlesPerSegment = 0
+
+        if actualHandleCount > 0:
+            handlesPerSegment = max(math.ceil(handlesToInit / float(actualHandleCount)), 1)
 
         # Build and connect all plugs
         # Note: Previous plugs are still with remnant values (newHandleCount < oldHandleCount),
@@ -1237,9 +1293,9 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
                 if actualHandleCount > 1:
 
                     # We distribute these new handles over existing segments, so try to distribute them evenly
-                    handleSegmentIndex = (i - actualHandleCount) / handlesPerSegment
+                    handleSegmentIndex = (i - actualHandleCount) % actualHandleCount
                     handleEndSegmendIndex = (handleSegmentIndex + 1) % actualHandleCount
-                    handleSegmentSubIndex = (i - actualHandleCount) % handlesPerSegment
+                    handleSegmentSubIndex = (i - actualHandleCount) / actualHandleCount
 
                     pT = float(handleSegmentSubIndex + 1) / float(handlesPerSegment + 1)
                     pFrom = axisHandlesSorted[handleSegmentIndex][1]
@@ -1263,7 +1319,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
                     # Default case... just add them over the curve
                     curveParameterPlug.setFloat(self.curveFn.findParamFromLength(self.curveFn.length() * float(i) / float(self.manipCount)))
 
-            fnDisc = OpenMayaUI.MFnDiscManip(self.manipHandleList[i][2])
+            fnDisc = OpenMayaUI.MFnDiscManip(self.manipHandleList[i][1])
             fnDisc.connectToAnglePlug(curveAnglePlug)
             discCenterIndex = fnDisc.centerIndex()
             discAxisIndex = fnDisc.axisIndex()
