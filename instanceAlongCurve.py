@@ -41,6 +41,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     inputTransformAttr = OpenMaya.MObject()
     inputShadingGroupAttr = OpenMaya.MObject()
 
+    # Translation offsets
+    inputLocalTranslationOffsetAttr = OpenMaya.MObject()
+    inputGlobalTranslationOffsetAttr = OpenMaya.MObject()
+
+    # Rotation offsets
+    inputLocalRotationOffsetAttr = OpenMaya.MObject()
+    inputGlobalRotationOffsetAttr = OpenMaya.MObject()
+
     # Instance count related attributes
     instanceCountAttr = OpenMaya.MObject()
     instancingModeAttr = OpenMaya.MObject()
@@ -48,6 +56,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     maxInstancesByLengthAttr = OpenMaya.MObject()
 
     # Curve axis data, to be manipulated by user
+    enableManipulatorsAttr = OpenMaya.MObject()
     curveAxisHandleAttr = CurveAxisHandleAttribute()
     curveAxisHandleCountAttr = OpenMaya.MObject()
 
@@ -55,7 +64,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     bboxAttr = OpenMaya.MObject()
 
     orientationModeAttr = OpenMaya.MObject()
-    inputOrientationAxisAttr = Vector3CompoundAttribute()
+    inputLocalOrientationAxisAttr = OpenMaya.MObject()
 
     class RampAttributes(object):
 
@@ -192,6 +201,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             if inputTransformFn is not None:
 
+                rotatePivot = inputTransformFn.rotatePivotTranslation(OpenMaya.MSpace.kObject)
+
                 transformFn = self.getNodeTransformFn()
                 newInstancesCount = expectedInstanceCount - numConnectedElements
                 availableIndices = self.getAvailableLogicalIndices(outputTranslationPlug, newInstancesCount)
@@ -210,6 +221,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                     # Parent new instance
                     transformFn.addChild(trInstance)
+
+                    instanceFn.setRotatePivotTranslation(rotatePivot, OpenMaya.MSpace.kObject)
 
                     instanceTranslatePlug = instanceFn.findPlug('translate', False)
                     outputTranslationPlugElement = outputTranslationPlug.elementByLogicalIndex(i)
@@ -324,10 +337,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
         return instanceCountPlug.asInt()
 
-    def getParamOffset(self):
-        p = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.distOffsetAttr)
-        return p.asFloat()
-
     def getRandomizedValue(self, random, randomAmplitude, value):
         return (random.random() * 2.0 - 1.0) * randomAmplitude + value
 
@@ -335,11 +344,22 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             point = OpenMaya.MPoint()
             curveLength = curveFn.length()
+            maxParam = curveFn.findParamFromLength(curveFn.length())
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
 
-            rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()            
+            # rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()            
             curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
             axisHandlesSorted = getSortedCurveAxisArray(self.thisMObject(), curveAxisHandleArray, count)
+
+            localTranslationOffset = dataBlock.outputValue(instanceAlongCurveLocator.inputLocalTranslationOffsetAttr.compound).asVector()
+            globalTranslationOffset = dataBlock.outputValue(instanceAlongCurveLocator.inputGlobalTranslationOffsetAttr.compound).asVector()
+            
+            inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
+
+            # Get pivot
+            rotatePivot = OpenMaya.MVector()
+            if inputTransformPlug.isConnected():
+                rotatePivot = OpenMaya.MVector(self.getInputTransformFn().rotatePivot(OpenMaya.MSpace.kObject))
 
             # Deterministic random
             random.seed(count)
@@ -352,19 +372,23 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
 
                 # EP curves **really** dont like param at 0.0 
-                param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.01 )
+                param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0)
                 curveFn.getPointAtParam(param, point)
 
-                try:
-                    normal = curveFn.normal(param).normal()
-                    tangent = curveFn.tangent(param).normal()
-                    bitangent = (normal ^ tangent).normal()
-                except:
-                    # If base cannot be computed, fallback to identity rotation.
-                    # This seems to be a bug in the API...
-                    normal = OpenMaya.MVector(0.0, 1.0, 0.0)
-                    tangent = OpenMaya.MVector(0.0, 0.0, 1.0)
-                    bitangent = OpenMaya.MVector(1.0, 0.0, 0.0)
+                # tangent = curveFn.tangent(param)
+
+                # rot = startOrientation.rotateTo(tangent)
+
+                # try:
+                #     normal = curveFn.normal(param).normal()
+                #     tangent = curveFn.tangent(param).normal()
+                #     bitangent = (normal ^ tangent).normal()
+                # except:
+                #     # If base cannot be computed, fallback to identity rotation.
+                #     # This seems to be a bug in the API...
+                #     normal = OpenMaya.MVector(0.0, 1.0, 0.0)
+                #     tangent = OpenMaya.MVector(0.0, 0.0, 1.0)
+                #     bitangent = OpenMaya.MVector(1.0, 0.0, 0.0)
 
                 # if rotMode == 5:
                 #     rot = getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length()))
@@ -372,11 +396,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 #     tangent = tangent.rotateBy(rot) 
                 #     bitangent = bitangent.rotateBy(rot)
 
-                twistNormal = normal * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
-                twistBitangent = bitangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-                twistTangent = tangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+                # twistNormal = normal * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
+                # twistBitangent = bitangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
+                # twistTangent = tangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
 
-                point += twistNormal + twistTangent + twistBitangent
+                # point += twistNormal + twistTangent + twistBitangent
+
+                point += globalTranslationOffset - rotatePivot
 
                 translateArrayHandle.jumpToArrayElement(i)
                 translateHandle = translateArrayHandle.outputValue()
@@ -479,22 +505,52 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         point = OpenMaya.MPoint()
         curveLength = curveFn.length()
         rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
-        startOrientation = dataBlock.outputValue(instanceAlongCurveLocator.inputOrientationAxisAttr.compound).asVector().normal()
+
+        # All offsets are in degrees
+        localRotationOffset = dataBlock.inputValue(instanceAlongCurveLocator.inputLocalRotationOffsetAttr.compound).asVector() * math.radians(1)
+        globalRotationOffset = dataBlock.inputValue(instanceAlongCurveLocator.inputGlobalRotationOffsetAttr.compound).asVector() * math.radians(1)
+
+        localRotationOffset = OpenMaya.MEulerRotation(localRotationOffset.x, localRotationOffset.y, localRotationOffset.z).asQuaternion()
+        globalRotationOffset = OpenMaya.MEulerRotation(globalRotationOffset.x, globalRotationOffset.y, globalRotationOffset.z).asQuaternion()
+
+        # Important: enums are short! If not, the resulting int may be incorrect
+        rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asShort()
+        localRotationAxisMode = dataBlock.inputValue(instanceAlongCurveLocator.inputLocalOrientationAxisAttr).asShort()
+
+        if localRotationAxisMode == 0:
+            forward = OpenMaya.MVector.xAxis
+            up = OpenMaya.MVector.yAxis
+            right = OpenMaya.MVector.zAxis
+        elif localRotationAxisMode == 1:
+            forward = OpenMaya.MVector.yAxis
+            up = OpenMaya.MVector.zAxis
+            right = OpenMaya.MVector.xAxis
+        elif localRotationAxisMode == 2:
+            forward = OpenMaya.MVector.zAxis
+            up = OpenMaya.MVector.yAxis
+            right = OpenMaya.MVector.xAxis
+
+        # We use Z axis as forward, and adjust locally to that axis
+        referenceAxis = OpenMaya.MVector.zAxis
+        referenceUp = OpenMaya.MVector.yAxis
+        localRotation = localRotationOffset.inverse() * referenceAxis.rotateTo(forward)
 
         # Deterministic random
         random.seed(count)
         rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.rotationRampAttr, True)
 
-        rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()
-
+        # Manipulator stuff
         curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
         axisHandlesSorted = getSortedCurveAxisArray(self.thisMObject(), curveAxisHandleArray, count)
 
+        # Original transform data
         inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
         inputTransformRotation = OpenMaya.MQuaternion()
 
         maxParam = curveFn.findParamFromLength(curveFn.length())
         curveForm = curveFn.form()
+
+        enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
         # First, map parameter
         if inputTransformPlug.isConnected():
@@ -503,58 +559,47 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         for i in xrange(min(count, rotationArrayHandle.elementCount())):
 
             rampValue = self.getRampValueAtPosition(rampValues, i, count)
-
             dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
+            param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
 
-            # EP curves **really** dont like param at 0.0
-            param = max( min( curveFn.findParamFromLength( dist ), curveLength ), 0.01 )
+            tangent = curveFn.tangent(param)
+            rot = referenceAxis.rotateTo(tangent)
 
-            rot = OpenMaya.MQuaternion()
+            # If the axis is parallel, but with inverse direction, rotate it PI over the up vector
+            if referenceAxis.isParallel(tangent) and (referenceAxis * tangent < 0):
+                rot = OpenMaya.MQuaternion(math.pi, referenceUp)
 
-            # TODO: Optimize this, remove branching, unify rotations... 
-            # TODO: Remove normal rotation mode, it isnt very useful...
-            try:
-                normal = curveFn.normal(param).normal()
-                tangent = curveFn.tangent(param).normal()
-                bitangent = (normal ^ tangent).normal()
-            except:
-                # If base cannot be computed, fallback to identity rotation.
-                # This seems to be a bug in the API...
-                # If you want total control, use manipulators!
-                normal = OpenMaya.MVector(0.0, 1.0, 0.0)
-                tangent = OpenMaya.MVector(0.0, 0.0, 1.0)
-                bitangent = OpenMaya.MVector(1.0, 0.0, 0.0)
-        
-            if rotMode == 1:
-                rot = inputTransformRotation;
-            elif rotMode == 2:
-                # TODO: remove
-                rot = startOrientation.rotateTo(normal)
-            elif rotMode == 3:
-                rot = startOrientation.rotateTo(tangent)
-            elif rotMode == 4:
-                # TODO: make it optional
-                rot = startOrientation.rotateTo(tangent)
-                
-                if i % 2 == 1:
-                    rot *= OpenMaya.MQuaternion(3.141592 * .5, tangent)
-            elif rotMode == 5:
-
-                # Get the angle from handles, and rotate over tangent axis
-                # TODO: make it optional
-                angle = self.getRotationForParam(param, axisHandlesSorted, curveForm, maxParam)
-                rot = startOrientation.rotateTo(tangent) * OpenMaya.MQuaternion(-angle, tangent)
+            # Transform rotation so that it is aligned with the tangent. This fixes unintentional twisting
+            rot = localRotation * rot
+            
+            # The curve basis used for twisting
+            basisForward = tangent
+            basisUp = up.rotateBy(rot)
+            basisRight = right.rotateBy(rot)
 
             twistNormal = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x                
-            twistNormal = OpenMaya.MQuaternion(twistNormal * 0.0174532925, normal) # DegToRad
+            twistNormal = OpenMaya.MQuaternion(math.radians(twistNormal), basisRight) #X
 
             twistTangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-            twistTangent = OpenMaya.MQuaternion(twistTangent * 0.0174532925, tangent) # DegToRad
+            twistTangent = OpenMaya.MQuaternion(math.radians(twistTangent), basisUp) #Y
 
             twistBitangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
-            twistBitangent = OpenMaya.MQuaternion(twistBitangent * 0.0174532925, bitangent) # DegToRad
+            twistBitangent = OpenMaya.MQuaternion(math.radians(twistBitangent), basisForward) #Z
 
-            rot = (rot * twistNormal * twistTangent * twistBitangent).asEulerRotation().asVector()
+            # Modify resulting rotation based on mode
+            if rotMode == 0:                    # Identity
+                rot = OpenMaya.MQuaternion()
+            elif rotMode == 1:                  # Input rotation
+                rot = inputTransformRotation;
+            elif rotMode == 3 and i % 2 == 1:   # Chain mode
+                rot *= OpenMaya.MQuaternion(math.pi * .5, tangent)
+
+            # Get the angle from handles, and rotate over tangent axis
+            if enableManipulators:
+                angle = self.getRotationForParam(param, axisHandlesSorted, curveForm, maxParam)
+                rot = rot * OpenMaya.MQuaternion(-angle, tangent)
+
+            rot = ((rot * twistNormal * twistTangent * twistBitangent) * globalRotationOffset).asEulerRotation().asVector()
 
             rotationArrayHandle.jumpToArrayElement(i)
             rotationHandle = rotationArrayHandle.outputValue()
@@ -578,7 +623,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 curveFn = OpenMaya.MFnNurbsCurve(curve)
 
                 instanceCount = self.getInstanceCountByMode()
-                distOffset = self.getParamOffset()
+                distOffset = dataBlock.inputValue(instanceAlongCurveLocator.distOffsetAttr).asFloat()
 
                 if plug == instanceAlongCurveLocator.outputTranslationAttr.compound:
                     self.updateInstancePositions(curveFn, dataBlock, instanceCount, distOffset)
@@ -720,6 +765,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setConnectable( False )
         node.addAttribute( node.instanceCountAttr)
 
+        node.addCompoundVector3Attribute(node.inputLocalRotationOffsetAttr, "inputLocalRotationOffset", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 0.0))
+        node.addCompoundVector3Attribute(node.inputGlobalRotationOffsetAttr, "inputGlobalRotationOffset", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 0.0))
+
+        node.addCompoundVector3Attribute(node.inputGlobalTranslationOffsetAttr, "inputGlobalTranslationOffset", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 0.0))
+        node.addCompoundVector3Attribute(node.inputLocalTranslationOffsetAttr, "inputLocalTranslationOffset", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 0.0))
+
         ## curve parameter start offset
         node.distOffsetAttr = nAttr.create("distOffset", "pOffset", OpenMaya.MFnNumericData.kFloat, 0.0)
         node.addAttribute( node.distOffsetAttr )
@@ -755,17 +806,20 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.addAttribute( node.instancingModeAttr )
 
          # Enum for selection of orientation mode
-        node.orientationModeAttr = enumFn.create('orientationMode', 'rotMode')
+        node.orientationModeAttr = enumFn.create('orientationMode', 'orientationMode')
         enumFn.addField( "Identity", 0 );
         enumFn.addField( "Copy from Source", 1 );
-        enumFn.addField( "Normal", 2 );
-        enumFn.addField( "Tangent", 3 );
-        enumFn.addField( "Chain", 4 );
-        enumFn.addField( "Custom", 5 );
-        enumFn.setDefault("Tangent")
+        enumFn.addField( "Use Curve", 2 );
+        enumFn.addField( "Chain", 3 );
+        enumFn.setDefault("Use Curve")
         node.addAttribute( node.orientationModeAttr )
 
-        node.addCompoundVector3Attribute(node.inputOrientationAxisAttr, "inputOrientationAxis", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 1.0))
+        node.inputLocalOrientationAxisAttr = enumFn.create('inputLocalOrientationAxis', 'inputLocalOrientationAxis')
+        enumFn.addField("X", 0)
+        enumFn.addField("Y", 1)
+        enumFn.addField("Z", 2)
+        enumFn.setDefault("Z")
+        node.addAttribute( node.inputLocalOrientationAxisAttr )
 
         node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean)
         node.addAttribute( node.bboxAttr )
@@ -778,6 +832,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.addCompoundVector3Attribute(node.outputTranslationAttr, "outputTranslation", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputRotationAttr, "outputRotation", OpenMaya.MFnUnitAttribute.kAngle, True, False, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.outputScaleAttr, "outputScale", OpenMaya.MFnUnitAttribute.kDistance, True, False, OpenMaya.MVector(1.0, 1.0, 1.0))
+
+        ## Input instance count    
+        node.enableManipulatorsAttr = nAttr.create("enableManipulators", "enableManipulators", OpenMaya.MFnNumericData.kBoolean)
+        node.addAttribute( node.enableManipulatorsAttr)
 
         node.addCurveAxisHandleAttribute(node.curveAxisHandleAttr, "curveAxisHandle", OpenMaya.MVector(0.0,0.0,0.0))
 
@@ -807,7 +865,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instancingModeAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.distOffsetAttr, node.outputTranslationAttr.compound )
+        node.attributeAffects( node.inputTransformAttr, node.outputTranslationAttr.compound )
 
+        node.attributeAffects( node.inputLocalOrientationAxisAttr, node.outputTranslationAttr.compound)
+
+        node.attributeAffects(node.inputLocalTranslationOffsetAttr.compound, node.outputTranslationAttr.compound )
+        node.attributeAffects(node.inputGlobalTranslationOffsetAttr.compound, node.outputTranslationAttr.compound )
+
+        node.attributeAffects( node.enableManipulatorsAttr, node.outputTranslationAttr.compound)
         node.attributeAffects( node.curveAxisHandleAttr.compound, node.outputTranslationAttr.compound)
 
         rampAttributeAffects(node.positionRampAttr, node.outputTranslationAttr.compound)
@@ -820,10 +885,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.orientationModeAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.distOffsetAttr, node.outputRotationAttr.compound )
+        node.attributeAffects( node.inputTransformAttr, node.outputRotationAttr.compound )
 
-        node.attributeAffects( node.inputOrientationAxisAttr.compound, node.outputRotationAttr.compound)
-
+        node.attributeAffects( node.inputLocalOrientationAxisAttr, node.outputRotationAttr.compound)
+        
+        node.attributeAffects( node.enableManipulatorsAttr, node.outputRotationAttr.compound)
         node.attributeAffects( node.curveAxisHandleAttr.compound, node.outputRotationAttr.compound)
+
+        node.attributeAffects( node.inputGlobalRotationOffsetAttr.compound, node.outputRotationAttr.compound)
+        node.attributeAffects( node.inputLocalRotationOffsetAttr.compound, node.outputRotationAttr.compound)        
 
         rampAttributeAffects(node.rotationRampAttr, node.outputRotationAttr.compound)
 
@@ -834,7 +904,11 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.instancingModeAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.maxInstancesByLengthAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.distOffsetAttr, node.outputScaleAttr.compound )
+        node.attributeAffects( node.inputTransformAttr, node.outputScaleAttr.compound )
+
+        node.attributeAffects( node.inputLocalOrientationAxisAttr, node.outputScaleAttr.compound)
         
+        node.attributeAffects( node.enableManipulatorsAttr, node.outputScaleAttr.compound)
         node.attributeAffects( node.curveAxisHandleAttr.compound, node.outputScaleAttr.compound)
 
         rampAttributeAffects(node.scaleRampAttr, node.outputScaleAttr.compound)
@@ -868,19 +942,22 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceModeChanged)
             self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceModeChanged)
             self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceModeChanged)
-            self.addControl("distOffset", label="Initial Position Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "distOffset"))
-            
+
             self.addSeparator()
 
-            # Orientation controls
+            self.addControl("distOffset", label="Curve Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "distOffset"))
+
+            self.addSeparator()
+
+            # Orientation controls            
             self.addControl("orientationMode", label="Orientation Mode", changeCommand=lambda nodeName: self.updateOrientationChange(nodeName))
-            self.addControl("inputOrientationAxis", label="Orientation Axis", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputOrientationAxis"))
+            self.addControl("inputLocalOrientationAxis", label="Local Axis" , changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalOrientationAxis"))
 
             self.addSeparator()
 
             # Manipulator controls
-            self.addControl("curveAxisHandleCount", label="Manipulator count", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName))
-            
+            self.addControl("enableManipulators", label="Enable manipulators", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName))
+            self.addControl("curveAxisHandleCount", label="Manipulator count", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName))            
             self.callCustom(lambda attr: self.buttonNew(nodeName), lambda attr: None, "curveAxisHandleCount")
 
             self.addSeparator()
@@ -906,6 +983,16 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
                 self.addControl(rampName + "RampAxis", label= rampName.capitalize() + " Ramp Axis")
 
                 self.endLayout()
+
+            self.beginLayout("Offsets", collapse=True)
+
+            self.addControl("inputLocalTranslationOffset", label="Local Translation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalTranslationOffset"))
+            self.addControl("inputGlobalTranslationOffset", label="Global Translation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputGlobalTranslationOffset"))
+
+            self.addControl("inputLocalRotationOffset", label="Local Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalRotationOffset"))
+            self.addControl("inputGlobalRotationOffset", label="Global Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputGlobalRotationOffset"))
+            
+            self.endLayout()
 
             showRampControls("position")
             showRampControls("rotation")
@@ -995,7 +1082,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
         pm.gradientControl(attr)
 
     def updateManipCountDimming(self, nodeName):
-        self.updateDimming(nodeName, "curveAxisHandleCount", pm.PyNode(nodeName).orientationMode.get() == 5)
+        self.updateDimming(nodeName, "curveAxisHandleCount", pm.PyNode(nodeName).enableManipulators.get())
 
     def updateDimming(self, nodeName, attr, additionalCondition = True):
 
@@ -1176,6 +1263,19 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
 
                     instanceCountPlug = newNodeFn.findPlug("instanceCount", False)
                     instanceCountPlug.setInt(10)
+
+                    rotX = transformFn.findPlug("rotateX", False).asMAngle().asDegrees()
+                    rotY = transformFn.findPlug("rotateY", False).asMAngle().asDegrees()
+                    rotZ = transformFn.findPlug("rotateZ", False).asMAngle().asDegrees()
+
+                    plugOffsetX = newNodeFn.findPlug("inputLocalRotationOffsetX", False)
+                    plugOffsetY = newNodeFn.findPlug("inputLocalRotationOffsetY", False)
+                    plugOffsetZ = newNodeFn.findPlug("inputLocalRotationOffsetZ", False)
+
+                    plugOffsetX.setDouble(rotX)
+                    plugOffsetY.setDouble(rotY)
+                    plugOffsetZ.setDouble(rotZ)
+
                     
                 else:
                     sys.stderr.write("Please select a curve first")
@@ -1222,10 +1322,10 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         dagPath.extendToShape()
 
         nodeFn = OpenMaya.MFnDependencyNode(dagPath.node())
-        rotMode = nodeFn.findPlug(instanceAlongCurveLocator.orientationModeAttr).asInt()
+        enableManipulators = nodeFn.findPlug(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
         # If the node is not using the custom rotation, prevent the user from breaking it ;)
-        if rotMode != 5:
+        if not enableManipulators:
             return None
 
         self.manipCount = nodeFn.findPlug(instanceAlongCurveLocator.curveAxisHandleCountAttr).asInt()
