@@ -347,7 +347,28 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             maxParam = curveFn.findParamFromLength(curveFn.length())
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
 
-            # rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asInt()            
+            # Important: enums are short! If not, the resulting int may be incorrect
+            rotMode = dataBlock.inputValue(instanceAlongCurveLocator.orientationModeAttr).asShort()
+            localRotationAxisMode = dataBlock.inputValue(instanceAlongCurveLocator.inputLocalOrientationAxisAttr).asShort()
+
+            if localRotationAxisMode == 0:
+                forward = OpenMaya.MVector.xAxis
+                up = OpenMaya.MVector.yAxis
+                right = OpenMaya.MVector.zAxis
+            elif localRotationAxisMode == 1:
+                forward = OpenMaya.MVector.yAxis
+                up = OpenMaya.MVector.zAxis
+                right = OpenMaya.MVector.xAxis
+            elif localRotationAxisMode == 2:
+                forward = OpenMaya.MVector.zAxis
+                up = OpenMaya.MVector.yAxis
+                right = OpenMaya.MVector.xAxis
+
+            # We use Z axis as forward, and adjust locally to that axis
+            referenceAxis = OpenMaya.MVector.zAxis
+            referenceUp = OpenMaya.MVector.yAxis
+            localRotation = referenceAxis.rotateTo(forward)
+
             curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
             axisHandlesSorted = getSortedCurveAxisArray(self.thisMObject(), curveAxisHandleArray, count)
 
@@ -365,44 +386,53 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             random.seed(count)
             rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.positionRampAttr, False)
 
+            curveForm = curveFn.form()
+            enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
+
             # Make sure there are enough handles...
             for i in xrange(min(count, translateArrayHandle.elementCount())):
 
                 rampValue = self.getRampValueAtPosition(rampValues, i, count)
                 dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
-
-                # EP curves **really** dont like param at 0.0 
-                param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0)
+                param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
+                
+                # Get the actual point on the curve...
                 curveFn.getPointAtParam(param, point)
 
-                # tangent = curveFn.tangent(param)
+                tangent = curveFn.tangent(param)
+                rot = referenceAxis.rotateTo(tangent)
 
-                # rot = startOrientation.rotateTo(tangent)
+                # If the axis is parallel, but with inverse direction, rotate it PI over the up vector
+                if referenceAxis.isParallel(tangent) and (referenceAxis * tangent < 0):
+                    rot = OpenMaya.MQuaternion(math.pi, referenceUp)
 
-                # try:
-                #     normal = curveFn.normal(param).normal()
-                #     tangent = curveFn.tangent(param).normal()
-                #     bitangent = (normal ^ tangent).normal()
-                # except:
-                #     # If base cannot be computed, fallback to identity rotation.
-                #     # This seems to be a bug in the API...
-                #     normal = OpenMaya.MVector(0.0, 1.0, 0.0)
-                #     tangent = OpenMaya.MVector(0.0, 0.0, 1.0)
-                #     bitangent = OpenMaya.MVector(1.0, 0.0, 0.0)
+                # Transform rotation so that it is aligned with the tangent. This fixes unintentional twisting
+                rot = localRotation * rot
+                
+                # Modify resulting rotation based on mode
+                if rotMode == 0:                    # Identity
+                    rot = OpenMaya.MQuaternion()
+                elif rotMode == 1:                  # Input rotation
+                    rot = inputTransformRotation;
+                elif rotMode == 3 and i % 2 == 1:   # Chain mode, interesting for positioning ;)
+                    rot *= OpenMaya.MQuaternion(math.pi * .5, tangent)
 
-                # if rotMode == 5:
-                #     rot = getRotationForParam(param, axisHandlesSorted, curveFn.form(), curveFn.findParamFromLength(curveFn.length()))
-                #     normal = normal.rotateBy(rot)
-                #     tangent = tangent.rotateBy(rot) 
-                #     bitangent = bitangent.rotateBy(rot)
+                # Get the angle from handles, and rotate over tangent axis
+                if enableManipulators:
+                    angle = self.getRotationForParam(param, axisHandlesSorted, curveForm, maxParam)
+                    rot = rot * OpenMaya.MQuaternion(-angle, tangent)
 
-                # twistNormal = normal * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
-                # twistBitangent = bitangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-                # twistTangent = tangent * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+                # The curve basis used for twisting
+                basisForward = forward.rotateBy(rot)
+                basisUp = up.rotateBy(rot)
+                basisRight = right.rotateBy(rot)
 
-                # point += twistNormal + twistTangent + twistBitangent
+                twistNormal = basisRight * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
+                twistTangent = basisUp * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
+                twistBitangent = basisForward * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
 
-                point += globalTranslationOffset - rotatePivot
+                twist = (twistNormal + twistTangent + twistBitangent)
+                point += twist + globalTranslationOffset - rotatePivot
 
                 translateArrayHandle.jumpToArrayElement(i)
                 translateHandle = translateArrayHandle.outputValue()
@@ -572,8 +602,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             # Transform rotation so that it is aligned with the tangent. This fixes unintentional twisting
             rot = localRotation * rot
             
-            # The curve basis used for twisting
-            basisForward = tangent
+            # The curve basis used for twisting        
+            basisForward = forward.rotateBy(rot)
             basisUp = up.rotateBy(rot)
             basisRight = right.rotateBy(rot)
 
