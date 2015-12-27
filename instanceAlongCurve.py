@@ -201,7 +201,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             if inputTransformFn is not None:
 
-                rotatePivot = inputTransformFn.rotatePivotTranslation(OpenMaya.MSpace.kObject)
+                rotatePivot = inputTransformFn.rotatePivot(OpenMaya.MSpace.kTransform )
 
                 transformFn = self.getNodeTransformFn()
                 newInstancesCount = expectedInstanceCount - numConnectedElements
@@ -221,8 +221,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                     # Parent new instance
                     transformFn.addChild(trInstance)
-
-                    instanceFn.setRotatePivotTranslation(rotatePivot, OpenMaya.MSpace.kObject)
+                    instanceFn.setRotatePivot(rotatePivot, OpenMaya.MSpace.kTransform , False)
 
                     instanceTranslatePlug = instanceFn.findPlug('translate', False)
                     outputTranslationPlugElement = outputTranslationPlug.elementByLogicalIndex(i)
@@ -367,7 +366,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             # We use Z axis as forward, and adjust locally to that axis
             referenceAxis = OpenMaya.MVector.zAxis
             referenceUp = OpenMaya.MVector.yAxis
-            localRotation = referenceAxis.rotateTo(forward)
+
+            # Local offset is not considered for position
+            localRotation = forward.rotateTo(referenceAxis)
 
             curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
             axisHandlesSorted = getSortedCurveAxisArray(self.thisMObject(), curveAxisHandleArray, count)
@@ -379,14 +380,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             # Get pivot
             rotatePivot = OpenMaya.MVector()
+
             if inputTransformPlug.isConnected():
-                rotatePivot = OpenMaya.MVector(self.getInputTransformFn().rotatePivot(OpenMaya.MSpace.kObject))
+                rotatePivot = OpenMaya.MVector(self.getInputTransformFn().rotatePivot(OpenMaya.MSpace.kTransform ))
+                rotatePivot += OpenMaya.MVector(self.getInputTransformFn().rotatePivotTranslation(OpenMaya.MSpace.kTransform ))
 
             # Deterministic random
             random.seed(count)
             rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.positionRampAttr, False)
 
-            curveForm = curveFn.form()
+            curveForm = curveFn.form()  
             enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
             # Make sure there are enough handles...
@@ -397,6 +400,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
                 
                 # Get the actual point on the curve...
+                point = OpenMaya.MPoint()
                 curveFn.getPointAtParam(param, point)
 
                 tangent = curveFn.tangent(param)
@@ -563,7 +567,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         # We use Z axis as forward, and adjust locally to that axis
         referenceAxis = OpenMaya.MVector.zAxis
         referenceUp = OpenMaya.MVector.yAxis
-        localRotation = localRotationOffset.inverse() * referenceAxis.rotateTo(forward)
+
+        # Rotation to align selected (local) forward axis to the reference forward axis (which is aligned with tangent)
+        localRotation = localRotationOffset * forward.rotateTo(referenceAxis)
 
         # Deterministic random
         random.seed(count)
@@ -593,13 +599,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
 
             tangent = curveFn.tangent(param)
+
+            # Reference axis (Z) is now aligned with tangent
             rot = referenceAxis.rotateTo(tangent)
 
             # If the axis is parallel, but with inverse direction, rotate it PI over the up vector
             if referenceAxis.isParallel(tangent) and (referenceAxis * tangent < 0):
                 rot = OpenMaya.MQuaternion(math.pi, referenceUp)
 
-            # Transform rotation so that it is aligned with the tangent. This fixes unintentional twisting
+            # Rotate local axis to align with tangent
             rot = localRotation * rot
             
             # The curve basis used for twisting        
@@ -655,6 +663,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 instanceCount = self.getInstanceCountByMode()
                 distOffset = dataBlock.inputValue(instanceAlongCurveLocator.distOffsetAttr).asFloat()
 
+                # TODO: precalculate shared info...
                 if plug == instanceAlongCurveLocator.outputTranslationAttr.compound:
                     self.updateInstancePositions(curveFn, dataBlock, instanceCount, distOffset)
 
@@ -1591,3 +1600,6 @@ def getSortedCurveAxisArray(mObject, curveAxisHandleArray, count):
         return item[1]
 
     return sorted(axisHandles, key=getKey)
+
+def printVector(v, s=None):
+    print s + ":" + str(v.x) + ", " + str(v.y) + ", " + str(v.z)
