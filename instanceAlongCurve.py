@@ -49,6 +49,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     inputLocalRotationOffsetAttr = OpenMaya.MObject()
     inputGlobalRotationOffsetAttr = OpenMaya.MObject()
 
+    # Scale offset
+    inputLocalScaleOffsetAttr = OpenMaya.MObject()
+
     # Instance count related attributes
     instanceCountAttr = OpenMaya.MObject()
     instancingModeAttr = OpenMaya.MObject()
@@ -206,6 +209,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             if inputTransformFn is not None:
 
                 rotatePivot = inputTransformFn.rotatePivot(OpenMaya.MSpace.kTransform )
+                scalePivot = inputTransformFn.scalePivot(OpenMaya.MSpace.kTransform )
 
                 transformFn = self.getNodeTransformFn()
                 newInstancesCount = expectedInstanceCount - numConnectedElements
@@ -225,7 +229,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
                     # Parent new instance
                     transformFn.addChild(trInstance)
+
+                    # Pivots
                     instanceFn.setRotatePivot(rotatePivot, OpenMaya.MSpace.kTransform , False)
+                    instanceFn.setScalePivot(scalePivot, OpenMaya.MSpace.kTransform , False)
 
                     instanceTranslatePlug = instanceFn.findPlug('translate', False)
                     outputTranslationPlugElement = outputTranslationPlug.elementByLogicalIndex(i)
@@ -406,8 +413,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
             # Local translation offsets
-            localTranslationOffset = dataBlock.outputValue(instanceAlongCurveLocator.inputLocalTranslationOffsetAttr.compound).asVector()
-            globalTranslationOffset = dataBlock.outputValue(instanceAlongCurveLocator.inputGlobalTranslationOffsetAttr.compound).asVector()
+            localTranslationOffset = dataBlock.inputValue(instanceAlongCurveLocator.inputLocalTranslationOffsetAttr.compound).asVector()
+            globalTranslationOffset = dataBlock.inputValue(instanceAlongCurveLocator.inputGlobalTranslationOffsetAttr.compound).asVector()
             
             # Get pivot
             rotatePivot = OpenMaya.MVector()
@@ -493,6 +500,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             maxParam = curveFn.findParamFromLength(curveFn.length())
             scaleArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputScaleAttr.compound)
 
+            localScaleOffset = dataBlock.inputValue(instanceAlongCurveLocator.inputLocalScaleOffsetAttr.compound).asVector()
+
             # Deterministic random
             random.seed(count)
             rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.scaleRampAttr, False)
@@ -507,9 +516,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 normalizedDistance = dist / curveFn.length()
                 rampValue = self.getRampValueAtNormalizedPosition(rampValues, normalizedDistance)
 
-                point.x = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
-                point.y = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-                point.z = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+                # Ramp values are multiplied by the scale offset for flexibility
+                point.x = localScaleOffset.x * (1.0 + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x)
+                point.y = localScaleOffset.y * (1.0 + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y)
+                point.z = localScaleOffset.z * (1.0 + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z)
 
                 scaleArrayHandle.jumpToArrayElement(i)
                 scaleHandle = scaleArrayHandle.outputValue()
@@ -775,7 +785,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setKeyable( True )
         cls.addAttribute( rampAttributes.rampOffset )
 
-        rampAttributes.rampAmplitude = nAttr.create(attributeName + "RampAmplitude", attributeName + "RampAmplitude", OpenMaya.MFnNumericData.kFloat, 1.0)
+        rampAttributes.rampAmplitude = nAttr.create(attributeName + "RampAmplitude", attributeName + "RampAmplitude", OpenMaya.MFnNumericData.kFloat, 0.0)
         nAttr.setKeyable( True )
         cls.addAttribute( rampAttributes.rampAmplitude )
 
@@ -842,7 +852,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.inputCurveAttr = curveAttributeFn.create( 'inputCurve', 'curve', OpenMaya.MFnData.kNurbsCurve)
         node.addAttribute( node.inputCurveAttr )
         
-        ## Input instance count    
+        # Input instance count    
         node.instanceCountAttr = nAttr.create("instanceCount", "iic", OpenMaya.MFnNumericData.kInt, 5)
         nAttr.setMin(1)
         nAttr.setSoftMax(100)
@@ -856,7 +866,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.addCompoundVector3Attribute(node.inputGlobalTranslationOffsetAttr, "inputGlobalTranslationOffset", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 0.0))
         node.addCompoundVector3Attribute(node.inputLocalTranslationOffsetAttr, "inputLocalTranslationOffset", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(0.0, 0.0, 0.0))
 
-        ## curve parameter start offset
+        node.addCompoundVector3Attribute(node.inputLocalScaleOffsetAttr, "inputLocalScaleOffset", OpenMaya.MFnUnitAttribute.kDistance, False, True, OpenMaya.MVector(1.0, 1.0, 1.0))
+
+        # Curve parameter offset
         node.distOffsetAttr = nAttr.create("distOffset", "pOffset", OpenMaya.MFnNumericData.kFloat, 0.0)
         nAttr.setMin(0.0)
         nAttr.setKeyable( True )
@@ -923,8 +935,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.bboxAttr = nAttr.create('instanceBoundingBox', 'ibb', OpenMaya.MFnNumericData.kBoolean)
         node.addAttribute( node.bboxAttr )
 
-        node.addRampAttributes(node.positionRampAttr, "position", OpenMaya.MFnUnitAttribute.kDistance, OpenMaya.MVector(0.0, 0.0, 0.0))
-        node.addRampAttributes(node.rotationRampAttr, "rotation", OpenMaya.MFnUnitAttribute.kAngle, OpenMaya.MVector(0.0, 0.0, 0.0))
+        # Default translation ramp axis is UP
+        node.addRampAttributes(node.positionRampAttr, "position", OpenMaya.MFnUnitAttribute.kDistance, OpenMaya.MVector(0.0, 1.0, 0.0))
+
+        # Default rotation ramp axis is TANGENT
+        node.addRampAttributes(node.rotationRampAttr, "rotation", OpenMaya.MFnUnitAttribute.kDistance, OpenMaya.MVector(0.0, 0.0, 1.0))
+
+        # Default scale axis is uniform
         node.addRampAttributes(node.scaleRampAttr, "scale", OpenMaya.MFnUnitAttribute.kDistance, OpenMaya.MVector(1.0, 1.0, 1.0))
 
         # Output attributes
@@ -1021,6 +1038,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node.attributeAffects( node.curveStartAttr, node.outputScaleAttr.compound )
         node.attributeAffects( node.curveEndAttr, node.outputScaleAttr.compound )
 
+        node.attributeAffects(node.inputLocalScaleOffsetAttr.compound, node.outputScaleAttr.compound )
+
 ###############
 # AE TEMPLATE #
 ###############
@@ -1101,6 +1120,8 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
             self.addControl("inputLocalRotationOffset", label="Local Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalRotationOffset"))
             self.addControl("inputGlobalRotationOffset", label="Global Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputGlobalRotationOffset"))
+
+            self.addControl("inputLocalScaleOffset", label="Local Scale Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalScaleOffset"))
             
             self.endLayout()
 
@@ -1374,6 +1395,7 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                     instanceCountPlug = newNodeFn.findPlug("instanceCount", False)
                     instanceCountPlug.setInt(10)
 
+                    # Rotation offset initialized to original rotation
                     rotX = transformFn.findPlug("rotateX", False).asMAngle().asDegrees()
                     rotY = transformFn.findPlug("rotateY", False).asMAngle().asDegrees()
                     rotZ = transformFn.findPlug("rotateZ", False).asMAngle().asDegrees()
@@ -1386,6 +1408,18 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                     plugOffsetY.setDouble(rotY)
                     plugOffsetZ.setDouble(rotZ)
 
+                    # Scale offset initialized to original scale
+                    scaleX = transformFn.findPlug("scaleX", False).asFloat()
+                    scaleY = transformFn.findPlug("scaleY", False).asFloat()
+                    scaleZ = transformFn.findPlug("scaleZ", False).asFloat()
+
+                    plugOffsetX = newNodeFn.findPlug("inputLocalScaleOffsetX", False)
+                    plugOffsetY = newNodeFn.findPlug("inputLocalScaleOffsetY", False)
+                    plugOffsetZ = newNodeFn.findPlug("inputLocalScaleOffsetZ", False)
+
+                    plugOffsetX.setDouble(scaleX)
+                    plugOffsetY.setDouble(scaleY)
+                    plugOffsetZ.setDouble(scaleZ)
                     
                 else:
                     sys.stderr.write("Please select a curve first")
