@@ -331,13 +331,25 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceLengthAttr)
             maxInstancesByLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.maxInstancesByLengthAttr)
             curveFn = self.getCurveFn()
-            return min(maxInstancesByLengthPlug.asInt(), int(curveFn.length() / instanceLengthPlug.asFloat()))
+            return min(maxInstancesByLengthPlug.asInt(), int(math.ceil(curveFn.length() / instanceLengthPlug.asFloat())))
 
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
         return instanceCountPlug.asInt()
 
     def getRandomizedValue(self, random, randomAmplitude, value):
         return (random.random() * 2.0 - 1.0) * randomAmplitude + value
+
+    # Calculate expected instances by the instancing mode
+    def getIncrementByMode(self, count, curveFn):
+        instancingModePlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instancingModeAttr)
+       
+        # Distance defined manually
+        if instancingModePlug.asInt() == 1:
+            instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceLengthAttr)            
+            return instanceLengthPlug.asFloat()
+        
+        # Distance driven by count
+        return curveFn.length() / float(count)
 
     def updateInstancePositions(self, curveFn, dataBlock, count, distOffset ):
 
@@ -392,11 +404,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             curveForm = curveFn.form()  
             enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
+            lengthIncrement = self.getIncrementByMode(count, curveFn)
+
             # Make sure there are enough handles...
             for i in xrange(min(count, translateArrayHandle.elementCount())):
 
                 rampValue = self.getRampValueAtPosition(rampValues, i, count)
-                dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
+                dist = math.fmod(lengthIncrement * i + distOffset, curveLength)
                 param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
                 
                 # Get the actual point on the curve...
@@ -588,6 +602,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
+        lengthIncrement = self.getIncrementByMode(count, curveFn)
+
         # First, map parameter
         if inputTransformPlug.isConnected():
             self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
@@ -595,7 +611,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         for i in xrange(min(count, rotationArrayHandle.elementCount())):
 
             rampValue = self.getRampValueAtPosition(rampValues, i, count)
-            dist = math.fmod(curveLength * (i / float(count)) + distOffset, curveLength)
+            dist = math.fmod(i * lengthIncrement + distOffset, curveLength)
             param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
 
             tangent = curveFn.tangent(param)
