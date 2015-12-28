@@ -1065,63 +1065,105 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.beginLayout("Instance Along Curve Settings", collapse=0)
 
             # Base controls
-            self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged)
-            self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceModeChanged)
-            self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceModeChanged)
-            self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceModeChanged)
+            annotation = "Defines if the amount of instances is defined manually or by a predefined distance."
+            self.addControl("instancingMode", label="Instancing Mode", changeCommand=self.onInstanceModeChanged, annotation=annotation)
+
+            annotation = "The amount of instances to distribute. These are distributed uniformly."
+            self.addControl("instanceCount", label="Count", changeCommand=self.onInstanceModeChanged, annotation=annotation)
+
+            annotation = "If the locator mode is on Distance, this length will define the spacing between each instance. <br> <br> Note that if the curve length is greater than an integer amount of distances, some space will be left unoccupied."
+            self.addControl("instanceLength", label="Distance", changeCommand=self.onInstanceModeChanged, annotation=annotation)
+
+            annotation = "A safe guard to prevent having too many instances."
+            self.addControl("maxInstancesByLength", label="Max Instances", changeCommand=self.onInstanceModeChanged, annotation=annotation)
 
             self.addSeparator()
 
-            self.addControl("distOffset", label="Curve Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "distOffset"))
-            self.addControl("curveStart", label="Curve Start", changeCommand=lambda nodeName: self.updateDimming(nodeName, "curveStart"))
-            self.addControl("curveEnd", label="Curve End", changeCommand=lambda nodeName: self.updateDimming(nodeName, "curveEnd"))
+            annotation = "An offset for the evaluation of the curve position/rotation. This also modifies the ramp evaluation. "
+            self.addControl("distOffset", label="Curve Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "distOffset"), annotation=annotation)
+
+            annotation = "A cutoff value for the curve start point. This is normalized, so it should be in [0,1)"
+            self.addControl("curveStart", label="Curve Start", changeCommand=lambda nodeName: self.updateDimming(nodeName, "curveStart"), annotation=annotation)
+
+            annotation = "A cutoff value for the curve end point. This is normalized, so it should be in (0,1]"
+            self.addControl("curveEnd", label="Curve End", changeCommand=lambda nodeName: self.updateDimming(nodeName, "curveEnd"), annotation=annotation)
 
             self.addSeparator()
 
-            # Orientation controls            
-            self.addControl("orientationMode", label="Orientation Mode", changeCommand=lambda nodeName: self.updateOrientationChange(nodeName))
-            self.addControl("inputLocalOrientationAxis", label="Local Axis" , changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalOrientationAxis"))
+            # Orientation controls
+            annotation = "Identity: objects have no rotation. <br> <br> Copy From Source: Each object will copy the rotation transformation from the original. <br> <br> Use Curve: Objects will be aligned by the curve tangent with respect to the selected axis. <br> <br> Chain: Same as Use Curve, but with an additional 90 degree twist for odd instances."
+            self.addControl("orientationMode", label="Orientation Mode", changeCommand=lambda nodeName: self.updateOrientationChange(nodeName), annotation=annotation)
+
+            annotation = "Each instance will be rotated so that this axis is parallel to the curve tangent."
+            self.addControl("inputLocalOrientationAxis", label="Local Axis" , changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalOrientationAxis"), annotation=annotation)
 
             self.addSeparator()
 
             # Manipulator controls
-            self.addControl("enableManipulators", label="Enable manipulators", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName))
-            self.addControl("curveAxisHandleCount", label="Manipulator count", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName))            
+            annotation = "When enabled, the rotations can be manually defined."
+            self.addControl("enableManipulators", label="Enable manipulators", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName), annotation=annotation)
+
+            annotation = "This number will define the number of handles to manipulate the curve orientation. For changes to take effect, you must click the Edit Manipulators button. <br> <br> When incrementing the number, new handles will be created in between existing ones, interpolating their values."
+            self.addControl("curveAxisHandleCount", label="Manipulator count", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName), annotation=annotation)
             self.callCustom(lambda attr: self.buttonNew(nodeName), lambda attr: None, "curveAxisHandleCount")
 
             self.addSeparator()
 
             # Instance look controls
-            self.addControl("instanceDisplayType", label="Instance Display Type", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceDisplayType"))
-            self.addControl("instanceBoundingBox", label="Use bounding box", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceBoundingBox"))
+            annotation = "By default, objects display type is on Reference, so they cannot be selected. To change this, select Normal."
+            self.addControl("instanceDisplayType", label="Instance Display Type", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceDisplayType"), annotation=annotation)
+
+            annotation = "When true, objects will be shown as bounding boxes only."
+            self.addControl("instanceBoundingBox", label="Use bounding box", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceBoundingBox"), annotation=annotation)
             
             self.addSeparator()
             
             # Additional info
-            self.addControl("inputTransform", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransform"))
-            self.addControl("inputShadingGroup", label="Shading Group", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputShadingGroup"))
+            annotation = "The input object transform. DO NOT REMOVE THIS CONNECTION, or the node will stop working correctly."
+            self.addControl("inputTransform", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransform"), annotation=annotation)
+
+            annotation = "The shading group for the instances. When instantiating, they will be assigned this SG."
+            self.addControl("inputShadingGroup", label="Shading Group", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputShadingGroup"), annotation=annotation)
 
             def showRampControls(rampName):
 
                 self.beginLayout(rampName.capitalize() + " Control", collapse=True)
                 mel.eval('AEaddRampControl("' + nodeName + "." + rampName + 'Ramp"); ')
 
-                self.addControl(rampName + "RampOffset", label= rampName.capitalize() + " Ramp Offset")
-                self.addControl(rampName + "RampAmplitude", label= rampName.capitalize() + " Ramp Amplitude")
-                self.addControl(rampName + "RampRandomAmplitude", label= rampName.capitalize() + " Ramp Random")
-                self.addControl(rampName + "RampAxis", label= rampName.capitalize() + " Ramp Axis")
+                annotation = "An offset when evaluating the ramp. This is similar to the curve offset, but works only for the ramp."
+                self.addControl(rampName + "RampOffset", label= rampName.capitalize() + " Ramp Offset", annotation=annotation)
+
+                annotation = "Ramp values are multiplied by this amplitude."
+                self.addControl(rampName + "RampAmplitude", label= rampName.capitalize() + " Ramp Amplitude", annotation=annotation)
+
+                annotation = "A random value for the ramp amplitude. The result is <br><br> amplitude + (random() * 2.0 - 1.0) * <b>randomAmplitude</b>"
+                self.addControl(rampName + "RampRandomAmplitude", label= rampName.capitalize() + " Ramp Random", annotation=annotation)
+
+                annotation = "The axis over which the ramp is evaluated. The result depends on the type of ramp. <br> <br> The (X,Y,Z) values are over the local space of the transformed object (right/bitangent, up/normal, forward/tangent)."
+                self.addControl(rampName + "RampAxis", label= rampName.capitalize() + " Ramp Axis", annotation=annotation)
 
                 self.endLayout()
 
             self.beginLayout("Offsets", collapse=True)
 
-            self.addControl("inputLocalTranslationOffset", label="Local Translation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalTranslationOffset"))
-            self.addControl("inputGlobalTranslationOffset", label="Global Translation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputGlobalTranslationOffset"))
+            annotation = "A translation offset over the curve local space."
+            self.addControl("inputLocalTranslationOffset", label="Local Translation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalTranslationOffset"), annotation=annotation)
 
-            self.addControl("inputLocalRotationOffset", label="Local Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalRotationOffset"))
-            self.addControl("inputGlobalRotationOffset", label="Global Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputGlobalRotationOffset"))
+            annotation = "A translation offset in worldspace XYZ."
+            self.addControl("inputGlobalTranslationOffset", label="Global Translation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputGlobalTranslationOffset"), annotation=annotation)
 
-            self.addControl("inputLocalScaleOffset", label="Local Scale Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalScaleOffset"))
+            self.addSeparator()
+
+            annotation = "A rotation offset over the curve local space. This offset is initialized to the original object rotation. "
+            self.addControl("inputLocalRotationOffset", label="Local Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalRotationOffset"), annotation=annotation)
+
+            annotation = "A worldspace rotation offset."
+            self.addControl("inputGlobalRotationOffset", label="Global Rotation Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputGlobalRotationOffset"), annotation=annotation)
+
+            self.addSeparator()
+
+            annotation = "A scale offset over the object local space. This offset is initialized to the original object scale."
+            self.addControl("inputLocalScaleOffset", label="Local Scale Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputLocalScaleOffset"), annotation=annotation)
             
             self.endLayout()
 
@@ -1138,10 +1180,15 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
         # pm.separator( height=5, style='none')
         pm.rowLayout(numberOfColumns=3, adjustableColumn=1, columnWidth3=(80, 100, 100))
-        updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName))
+        self.updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName))
 
-        pm.button( label='Reset Positions', command=lambda *args: self.onResetManipPositions(nodeName))
-        pm.button( label='Reset Angles', command=lambda *args: self.onResetManipAngles(nodeName))
+        self.updateManipButton.setAnnotation("When pressed, the manipulators will be selected. If the manipulator count changed, it will be updated.")
+
+        self.resetPositionsButton = pm.button( label='Reset Positions', command=lambda *args: self.onResetManipPositions(nodeName))
+        self.resetPositionsButton.setAnnotation("When pressed, the manipulators will be uniformly distributed over the curve.")
+
+        self.resetAnglesButton = pm.button( label='Reset Angles', command=lambda *args: self.onResetManipAngles(nodeName))
+        self.resetAnglesButton.setAnnotation("When pressed, all the manipulator angles will be reset to 0.")
     
     def onResetManipPositions(self, nodeName):
 
@@ -1213,7 +1260,13 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
         pm.gradientControl(attr)
 
     def updateManipCountDimming(self, nodeName):
-        self.updateDimming(nodeName, "curveAxisHandleCount", pm.PyNode(nodeName).enableManipulators.get())
+
+        enableManips = pm.PyNode(nodeName).enableManipulators.get()
+
+        self.updateManipButton.setEnable(enableManips)
+        self.resetAnglesButton.setEnable(enableManips)
+        self.resetPositionsButton.setEnable(enableManips)        
+        self.updateDimming(nodeName, "curveAxisHandleCount", enableManips)
 
     def updateDimming(self, nodeName, attr, additionalCondition = True):
 
