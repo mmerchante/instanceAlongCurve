@@ -287,6 +287,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.instancingModeAttr)
         isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.instanceLengthAttr)
         isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.maxInstancesByLengthAttr)
+        isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.curveStartAttr)
+        isCorrectAttribute = isCorrectAttribute or (plug.attribute() == instanceAlongCurveLocator.curveEndAttr)
+
         isCorrectNode = OpenMaya.MFnDependencyNode(plug.node()).typeName() == kPluginNodeName
 
         try:
@@ -335,7 +338,17 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             instanceLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceLengthAttr)
             maxInstancesByLengthPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.maxInstancesByLengthAttr)
             curveFn = self.getCurveFn()
-            return min(maxInstancesByLengthPlug.asInt(), int(math.ceil(curveFn.length() / instanceLengthPlug.asFloat())))
+
+            # Known issue: even if the curve fn is dag path constructed, its length is not worldspace... 
+            # If you want perfect distance-based instancing, freeze the transformations of the curve
+            curveLength = curveFn.length()
+
+            curveStart = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.curveStartAttr).asFloat() * curveLength
+            curveEnd = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.curveEndAttr).asFloat() * curveLength
+
+            effectiveCurveLength = min(max(curveEnd - curveStart, 0.001), curveLength)
+
+            return min(maxInstancesByLengthPlug.asInt(), int(math.ceil(effectiveCurveLength / instanceLengthPlug.asFloat())))
 
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
         return instanceCountPlug.asInt()
