@@ -1061,8 +1061,15 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
         if self.node.type() == kPluginNodeName:
 
+            # Suppress all attributes, so that no extra controls are shown
+            for attr in pm.listAttr(nodeName):
+                self.suppress(attr)
+
+            self.callCustom(lambda: self.showTitle(), lambda: None)
+
             self.beginScrollLayout()
-            self.beginLayout("Instance Along Curve Settings", collapse=0)
+
+            self.beginLayout("General", collapse=0)
 
             # Base controls
             annotation = "Defines if the amount of instances is defined manually or by a predefined distance."
@@ -1117,14 +1124,9 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             self.addControl("instanceBoundingBox", label="Use bounding box", changeCommand=lambda nodeName: self.updateDimming(nodeName, "instanceBoundingBox"), annotation=annotation)
             
             self.addSeparator()
+
+            self.endLayout()
             
-            # Additional info
-            annotation = "The input object transform. DO NOT REMOVE THIS CONNECTION, or the node will stop working correctly."
-            self.addControl("inputTransform", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransform"), annotation=annotation)
-
-            annotation = "The shading group for the instances. When instantiating, they will be assigned this SG."
-            self.addControl("inputShadingGroup", label="Shading Group", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputShadingGroup"), annotation=annotation)
-
             def showRampControls(rampName):
 
                 self.beginLayout(rampName.capitalize() + " Control", collapse=True)
@@ -1170,11 +1172,22 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             showRampControls("position")
             showRampControls("rotation")
             showRampControls("scale")
-            
-            self.addExtraControls()
+
+            self.beginLayout("Extra", collapse=True)
+
+            # Additional info
+            annotation = "The input object transform. DO NOT REMOVE THIS CONNECTION, or the node will stop working correctly."
+            self.addControl("inputTransform", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransform"), annotation=annotation)
+
+            annotation = "The shading group for the instances. When instantiating, they will be assigned this SG."
+            self.addControl("inputShadingGroup", label="Shading Group", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputShadingGroup"), annotation=annotation)
 
             self.endLayout()
+
             self.endScrollLayout()
+
+    def showTitle(self):
+        pm.text("Instance Along Curve v" + kPluginVersion, font="boldLabelFont")
 
     def buttonNew(self, nodeName):
 
