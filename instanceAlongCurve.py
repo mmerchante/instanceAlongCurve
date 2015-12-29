@@ -1112,7 +1112,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
             annotation = "This number will define the number of handles to manipulate the curve orientation. For changes to take effect, you must click the Edit Manipulators button. <br> <br> When incrementing the number, new handles will be created in between existing ones, interpolating their values."
             self.addControl("curveAxisHandleCount", label="Manipulator count", changeCommand=lambda nodeName: self.updateManipCountDimming(nodeName), annotation=annotation)
-            self.callCustom(lambda attr: self.buttonNew(nodeName), lambda attr: None, "curveAxisHandleCount")
+            self.callCustom(lambda attr: self.buttonNew(nodeName), self.buttonUpdate, "curveAxisHandleCount")
 
             self.addSeparator()
 
@@ -1193,8 +1193,8 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
         # pm.separator( height=5, style='none')
         pm.rowLayout(numberOfColumns=3, adjustableColumn=1, columnWidth3=(80, 100, 100))
-        self.updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName))
 
+        self.updateManipButton = pm.button( label='Edit Manipulators...', command=lambda *args: self.onEditManipulators(nodeName))
         self.updateManipButton.setAnnotation("When pressed, the manipulators will be selected. If the manipulator count changed, it will be updated.")
 
         self.resetPositionsButton = pm.button( label='Reset Positions', command=lambda *args: self.onResetManipPositions(nodeName))
@@ -1202,6 +1202,13 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
         self.resetAnglesButton = pm.button( label='Reset Angles', command=lambda *args: self.onResetManipAngles(nodeName))
         self.resetAnglesButton.setAnnotation("When pressed, all the manipulator angles will be reset to 0.")
+    
+    def buttonUpdate(self, attr):
+
+        nodeName = pm.PyNode(attr).nodeName()
+        self.updateManipButton.setCommand(lambda *args: self.onEditManipulators(nodeName))
+        self.resetPositionsButton.setCommand(lambda *args: self.onResetManipPositions(nodeName))
+        self.resetAnglesButton.setCommand(lambda *args: self.onResetManipAngles(nodeName))
     
     def onResetManipPositions(self, nodeName):
 
