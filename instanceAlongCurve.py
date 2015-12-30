@@ -243,6 +243,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                     instanceScalePlug = instanceFn.findPlug('scale', False)
                     outputScalePlugElement = outputScalePlug.elementByLogicalIndex(i)
 
+                    # Make instance visible
+                    instanceFn.findPlug("visibility", False).setBool(True)
+
                     # Enable drawing overrides
                     overrideEnabledPlug = instanceFn.findPlug("overrideEnabled", False)
                     overrideEnabledPlug.setBool(True)
