@@ -36,6 +36,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             self.parameter = OpenMaya.MObject()
             self.angle = OpenMaya.MObject() # The angle over the tangent axis
 
+    # Legacy attributes to support backward compatibility
+    legacyInputTransformAttr = OpenMaya.MObject()
+
     # Input attributes
     inputCurveAttr = OpenMaya.MObject()
     inputTransformAttr = OpenMaya.MObject()
@@ -77,6 +80,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             self.rampAxis = OpenMaya.MObject() # ramp normalized axis
             self.rampAmplitude = OpenMaya.MObject() # ramp amplitude
             self.rampRandomAmplitude = OpenMaya.MObject() # ramp random amplitude
+            self.rampRepeat = OpenMaya.MObject()
 
     # Simple container class for compound vector attributes
     class RampValueContainer(object):
@@ -86,6 +90,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             self.rampOffset = dataBlock.inputValue(rampAttr.rampOffset).asFloat()
             self.rampRandomAmplitude = dataBlock.inputValue(rampAttr.rampRandomAmplitude).asFloat()
             self.rampAmplitude = dataBlock.inputValue(rampAttr.rampAmplitude).asFloat()
+            self.rampRepeat = dataBlock.inputValue(rampAttr.rampRepeat).asFloat()
 
             if normalize:
                 self.rampAxis = dataBlock.inputValue(rampAttr.rampAxis.compound).asVector().normal()
@@ -309,8 +314,20 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             sys.stderr.write('Failed trying to update instances. stack trace: \n')
             sys.stderr.write(traceback.format_exc())
 
-    def getInputTransformFn(self):
+    def getInputTransformPlug(self):
+
+        # Backward compatibility
         inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
+        legacyInputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.legacyInputTransformAttr)
+
+        if(legacyInputTransformPlug.isConnected()):
+            inputTransformPlug = legacyInputTransformPlug
+
+        return inputTransformPlug
+
+    def getInputTransformFn(self):
+
+        inputTransformPlug = self.getInputTransformPlug()
         transform = getSingleSourceObjectFromPlug(inputTransformPlug)
 
         # Get Fn from a DAG path to get the world transformations correctly
@@ -378,10 +395,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         # Distance driven by count
         return effectiveCurveLength / float(count)
 
-    def updateInstancePositions(self, curveFn, dataBlock, count, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement):
+    def updateInstancePositions(self, curveFn, dataBlock, count, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement, inputTransformPlug, inputTransformFn, axisHandlesSorted):
 
             # Common data
-            inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
             maxParam = curveFn.findParamFromLength(curveFn.length())
             curveForm = curveFn.form()
@@ -411,8 +427,6 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             localRotation = forward.rotateTo(referenceAxis)
 
             # Manipulator data
-            curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
-            axisHandlesSorted = getSortedCurveAxisArray(self.thisMObject(), curveAxisHandleArray, count)
             enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
             # Local translation offsets
@@ -423,12 +437,18 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             rotatePivot = OpenMaya.MVector()
 
             if inputTransformPlug.isConnected():
-                rotatePivot = OpenMaya.MVector(self.getInputTransformFn().rotatePivot(OpenMaya.MSpace.kTransform ))
-                rotatePivot += OpenMaya.MVector(self.getInputTransformFn().rotatePivotTranslation(OpenMaya.MSpace.kTransform ))
+                rotatePivot = OpenMaya.MVector(inputTransformFn.rotatePivot(OpenMaya.MSpace.kTransform ))
+                rotatePivot += OpenMaya.MVector(inputTransformFn.rotatePivotTranslation(OpenMaya.MSpace.kTransform ))
 
             # Deterministic random
             random.seed(count)
             rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.positionRampAttr, False)
+
+            inputTransformRotation = OpenMaya.MQuaternion()
+
+            # First, map parameter
+            if inputTransformPlug.isConnected():
+                inputTransformFn.getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
 
             # Make sure there are enough handles...
             for i in xrange(min(count, translateArrayHandle.elementCount())):
@@ -492,7 +512,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         util.createFromDouble(0.0)
         valuePtr = util.asFloatPtr()
         
-        position = math.fmod(v + rampValues.rampOffset, 1.0)
+        position = math.fmod((v * rampValues.rampRepeat) + rampValues.rampOffset, 1.0)
         rampValues.ramp.getValueAtPosition(position, valuePtr)
 
         return util.getFloat(valuePtr)
@@ -585,7 +605,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         return 0.0
 
-    def updateInstanceRotations(self, curveFn, dataBlock, count, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement):
+    def updateInstanceRotations(self, curveFn, dataBlock, count, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement, inputTransformPlug, inputTransformFn, axisHandlesSorted):
 
         # Common data
         maxParam = curveFn.findParamFromLength(curveFn.length())
@@ -628,17 +648,14 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.rotationRampAttr, True)
 
         # Manipulator stuff
-        curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
-        axisHandlesSorted = getSortedCurveAxisArray(self.thisMObject(), curveAxisHandleArray, count)
         enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
 
         # Original transform data
-        inputTransformPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr)
         inputTransformRotation = OpenMaya.MQuaternion()
 
         # First, map parameter
         if inputTransformPlug.isConnected():
-            self.getInputTransformFn().getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
+            inputTransformFn.getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
 
         for i in xrange(min(count, rotationArrayHandle.elementCount())):
 
@@ -708,29 +725,46 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             curveDataHandle = dataBlock.inputValue(instanceAlongCurveLocator.inputCurveAttr)
             curve = curveDataHandle.asNurbsCurveTransformed()
 
+            updateTranslation = (plug == instanceAlongCurveLocator.outputTranslationAttr.compound)
+            updateRotation = (plug == instanceAlongCurveLocator.outputRotationAttr.compound)
+            updateScale = (plug == instanceAlongCurveLocator.outputScaleAttr.compound)
+
             if not curve.isNull():
-                curveFn = OpenMaya.MFnNurbsCurve(curve)
 
-                instanceCount = self.getInstanceCountByMode()
-                distOffset = dataBlock.inputValue(instanceAlongCurveLocator.distOffsetAttr).asFloat()
-                curveLength = curveFn.length()
+                if updateTranslation or updateRotation or updateScale:
+                    curveFn = OpenMaya.MFnNurbsCurve(curve)
 
-                # Curve thresholds
-                curveStart = dataBlock.inputValue(instanceAlongCurveLocator.curveStartAttr).asFloat() * curveLength
-                curveEnd = dataBlock.inputValue(instanceAlongCurveLocator.curveEndAttr).asFloat() * curveLength
+                    instanceCount = self.getInstanceCountByMode()
+                    distOffset = dataBlock.inputValue(instanceAlongCurveLocator.distOffsetAttr).asFloat()
+                    curveLength = curveFn.length()
 
-                effectiveCurveLength = min(max(curveEnd - curveStart, 0.001), curveLength)
-                lengthIncrement = self.getIncrementByMode(instanceCount, effectiveCurveLength)
+                    # Curve thresholds
+                    curveStart = dataBlock.inputValue(instanceAlongCurveLocator.curveStartAttr).asFloat() * curveLength
+                    curveEnd = dataBlock.inputValue(instanceAlongCurveLocator.curveEndAttr).asFloat() * curveLength
 
-                # TODO: precalculate shared info...
-                if plug == instanceAlongCurveLocator.outputTranslationAttr.compound:
-                    self.updateInstancePositions(curveFn, dataBlock, instanceCount, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement)
+                    effectiveCurveLength = min(max(curveEnd - curveStart, 0.001), curveLength)
+                    lengthIncrement = self.getIncrementByMode(instanceCount, effectiveCurveLength)
 
-                if plug == instanceAlongCurveLocator.outputRotationAttr.compound:
-                    self.updateInstanceRotations(curveFn, dataBlock, instanceCount, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement)
+                    # Common data
+                    inputTransformPlug = self.getInputTransformPlug()
+                    inputTransformFn = self.getInputTransformFn()
+                    
+                    # Force update of transformation 
+                    if OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.inputTransformAttr).isConnected():
+                        dataBlock.inputValue(inputTransformPlug).asMatrix()
 
-                if plug == instanceAlongCurveLocator.outputScaleAttr.compound:
-                    self.updateInstanceScale(curveFn, dataBlock, instanceCount, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement)
+                    # Manipulator data
+                    curveAxisHandleArray = dataBlock.inputArrayValue(instanceAlongCurveLocator.curveAxisHandleAttr.compound)
+                    axisHandlesSorted = getSortedCurveAxisArray(self.thisMObject(), curveAxisHandleArray, instanceCount)
+
+                    if updateTranslation:
+                        self.updateInstancePositions(curveFn, dataBlock, instanceCount, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement, inputTransformPlug, inputTransformFn, axisHandlesSorted)
+
+                    if updateRotation:
+                        self.updateInstanceRotations(curveFn, dataBlock, instanceCount, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement, inputTransformPlug, inputTransformFn, axisHandlesSorted)
+
+                    if updateScale:
+                        self.updateInstanceScale(curveFn, dataBlock, instanceCount, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement)
 
         except:
             sys.stderr.write('Failed trying to compute locator. stack trace: \n')
@@ -792,6 +826,10 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         nAttr.setKeyable( True )
         cls.addAttribute( rampAttributes.rampAmplitude )
 
+        rampAttributes.rampRepeat = nAttr.create(attributeName + "RampRepeat", attributeName + "RampRepeat", OpenMaya.MFnNumericData.kFloat, 1.0)
+        nAttr.setKeyable( True )
+        cls.addAttribute( rampAttributes.rampRepeat )
+
         rampAttributes.rampRandomAmplitude = nAttr.create(attributeName + "RampRandomAmplitude", attributeName + "RampRandomAmplitude", OpenMaya.MFnNumericData.kFloat, 0.0)
         nAttr.setMin(0.0)
         nAttr.setSoftMax(1.0)
@@ -841,12 +879,16 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         node = instanceAlongCurveLocator
 
         nAttr = OpenMaya.MFnNumericAttribute()
+        matrixAttrFn = OpenMaya.MFnMatrixAttribute()
         msgAttributeFn = OpenMaya.MFnMessageAttribute()
         curveAttributeFn = OpenMaya.MFnTypedAttribute()
         enumFn = OpenMaya.MFnEnumAttribute()
 
-        node.inputTransformAttr = msgAttributeFn.create("inputTransform", "it")
+        node.inputTransformAttr = matrixAttrFn.create("inputTransformMatrix", "inputTransformMatrix", OpenMaya.MFnMatrixAttribute.kFloat)
         node.addAttribute( node.inputTransformAttr )
+
+        node.legacyInputTransformAttr = msgAttributeFn.create("inputTransform", "it")
+        node.addAttribute( node.legacyInputTransformAttr)
 
         node.inputShadingGroupAttr = msgAttributeFn.create("inputShadingGroup", "iSG")    
         node.addAttribute( node.inputShadingGroupAttr )
@@ -972,6 +1014,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             node.attributeAffects( rampAttributes.rampAmplitude, affectedAttr)
             node.attributeAffects( rampAttributes.rampAxis.compound, affectedAttr)
             node.attributeAffects( rampAttributes.rampRandomAmplitude, affectedAttr)
+            node.attributeAffects( rampAttributes.rampRepeat, affectedAttr)
 
         # Curve Axis affects, for manipulator
         node.attributeAffects( node.inputCurveAttr, node.curveAxisHandleAttr.compound )
@@ -1138,6 +1181,9 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
                 annotation = "An offset when evaluating the ramp. This is similar to the curve offset, but works only for the ramp."
                 self.addControl(rampName + "RampOffset", label= rampName.capitalize() + " Ramp Offset", annotation=annotation)
 
+                annotation = "A multiplier to evaluate multiple times the same ramp over the curve"
+                self.addControl(rampName + "RampRepeat", label= rampName.capitalize() + " Ramp Repeat", annotation=annotation)
+
                 annotation = "Ramp values are multiplied by this amplitude."
                 self.addControl(rampName + "RampAmplitude", label= rampName.capitalize() + " Ramp Amplitude", annotation=annotation)
 
@@ -1180,7 +1226,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
             # Additional info
             annotation = "The input object transform. DO NOT REMOVE THIS CONNECTION, or the node will stop working correctly."
-            self.addControl("inputTransform", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransform"), annotation=annotation)
+            self.addControl("inputTransformMatrix", label="Input object", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputTransformMatrix"), annotation=annotation)
 
             annotation = "The shading group for the instances. When instantiating, they will be assigned this SG."
             self.addControl("inputShadingGroup", label="Shading Group", changeCommand=lambda nodeName: self.updateDimming(nodeName, "inputShadingGroup"), annotation=annotation)
@@ -1297,7 +1343,7 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
 
             node = pm.PyNode(nodeName)
             instanced = node.isInstanced()
-            hasInputTransform = node.inputTransform.isConnected()
+            hasInputTransform = node.inputTransform.isConnected() or node.inputTransformMatrix.isConnected()
             hasInputCurve = node.inputCurve.isConnected()
 
             self.dimControl(nodeName, attr, instanced or (not hasInputCurve) or (not hasInputTransform) or (not additionalCondition))
@@ -1408,7 +1454,8 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
 
                     # We need the shape's transform too
                     transformFn = OpenMaya.MFnDagNode(shapeDagPath.transform())
-                    transformMessagePlug = transformFn.findPlug("message", True)
+                    transformMessagePlug = transformFn.findPlug("worldMatrix", True)
+                    transformMessagePlug = transformMessagePlug.elementByLogicalIndex(0)
 
                     shadingGroupFn = self.findShadingGroup(shapeDagPath)
 
@@ -1451,16 +1498,16 @@ class instanceAlongCurveCommand(OpenMayaMPx.MPxCommand):
                     OpenMaya.MGlobal.setActiveSelectionList(msel)
 
                     # Connect :D
-                    mdgModifier = OpenMaya.MDGModifier()
-                    self.mUndo.append(mdgModifier)               
-                    mdgModifier.connect(curvePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr))
-                    mdgModifier.connect(transformMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputTransformAttr))
+                    mdagModifier = OpenMaya.MDagModifier()
+                    self.mUndo.append(mdagModifier)               
+                    mdagModifier.connect(curvePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputCurveAttr))
+                    mdagModifier.connect(transformMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputTransformAttr))
 
                     if shadingGroupFn is not None:
                         shadingGroupMessagePlug = shadingGroupFn.findPlug("message", True)
-                        mdgModifier.connect(shadingGroupMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputShadingGroupAttr))
+                        mdagModifier.connect(shadingGroupMessagePlug, newNodeFn.findPlug(instanceAlongCurveLocator.inputShadingGroupAttr))
 
-                    mdgModifier.doIt()
+                    mdagModifier.doIt()
 
                     # (pymel) create a locator and make it the parent
                     locator = pm.createNode('locator', ss=True, p=newNodeTransformName)
