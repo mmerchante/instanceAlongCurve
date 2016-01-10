@@ -15,7 +15,7 @@ Changelog
 
 #### Changes
 * Reworked core logic, orientation axis easier to handle/understand
-* Objects now preserve their initial rotation
+* Objects now preserve their initial rotation and pivots
 
 #### Fixes
 * Copy input transform now updating correctly
