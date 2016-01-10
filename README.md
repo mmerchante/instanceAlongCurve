@@ -2,13 +2,13 @@
 [Instance Along Curve](http://mmerchante.github.io/instanceAlongCurve)
 ==================
 
-Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node called instanceAlongCurveLocator, which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
+Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
 
 Short demo at: [Youtube](https://www.youtube.com/watch?v=k4i_dZjxVr0)
 
 ## Current Version: 1.1.0
 
-### NEW (v1.1.0) features
+### (v1.1.0) NEW features
 * Added rotation manipulators, with options to reset both positions and angles
 * Added translate, rotate and scale offsets, both local and global
 * Instantiates objects based on their pivots
