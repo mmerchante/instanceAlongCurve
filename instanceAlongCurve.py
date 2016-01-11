@@ -539,10 +539,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 normalizedDistance = dist / curveFn.length()
                 rampValue = self.getRampValueAtNormalizedPosition(rampValues, normalizedDistance)
 
-                # Ramp values are multiplied by the scale offset for flexibility
-                point.x = localScaleOffset.x * (1.0 + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x)
-                point.y = localScaleOffset.y * (1.0 + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y)
-                point.z = localScaleOffset.z * (1.0 + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z)
+                point.x = localScaleOffset.x + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
+                point.y = localScaleOffset.y + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
+                point.z = localScaleOffset.z + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
 
                 scaleArrayHandle.jumpToArrayElement(i)
                 scaleHandle = scaleArrayHandle.outputValue()
