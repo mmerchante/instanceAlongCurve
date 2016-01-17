@@ -399,7 +399,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             # Common data
             translateArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputTranslationAttr.compound)
-            maxParam = curveFn.findParamFromLength(curveFn.length())
+            curveLength = curveFn.length()
+            maxParam = curveFn.findParamFromLength(curveLength)
             curveForm = curveFn.form()
 
             # Important: enums are short! If not, the resulting int may be incorrect
@@ -453,7 +454,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             # Make sure there are enough handles...
             for i in xrange(min(count, translateArrayHandle.elementCount())):
 
-                dist = curveStart + math.fmod(lengthIncrement * i + distOffset, effectiveCurveLength)
+                dist = math.fmod(curveStart + math.fmod(lengthIncrement * i + distOffset, effectiveCurveLength), curveLength)
                 param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
 
                 # Ramps are not modified by curve start/end, so objects can "slide"
@@ -520,7 +521,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     def updateInstanceScale(self, curveFn, dataBlock, count, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement):
 
             point = OpenMaya.MPoint()
-            maxParam = curveFn.findParamFromLength(curveFn.length())
+            curveLength = curveFn.length()
+            maxParam = curveFn.findParamFromLength(curveLength)
             scaleArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputScaleAttr.compound)
 
             localScaleOffset = dataBlock.inputValue(instanceAlongCurveLocator.inputLocalScaleOffsetAttr.compound).asVector()
@@ -532,7 +534,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             # Make sure there are enough handles...
             for i in xrange(min(count, scaleArrayHandle.elementCount())):
 
-                dist = curveStart + math.fmod(lengthIncrement * i + distOffset, effectiveCurveLength)
+                dist = math.fmod(curveStart + math.fmod(lengthIncrement * i + distOffset, effectiveCurveLength), curveLength)
                 param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
 
                 # Ramps are not modified by curve start/end, so objects can "slide"
@@ -607,7 +609,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     def updateInstanceRotations(self, curveFn, dataBlock, count, distOffset, curveStart, curveEnd, effectiveCurveLength, lengthIncrement, inputTransformPlug, inputTransformFn, axisHandlesSorted):
 
         # Common data
-        maxParam = curveFn.findParamFromLength(curveFn.length())
+        curveLength = curveFn.length()
+        maxParam = curveFn.findParamFromLength(curveLength)
         curveForm = curveFn.form()
         rotationArrayHandle = dataBlock.outputArrayValue(instanceAlongCurveLocator.outputRotationAttr.compound)
 
@@ -657,8 +660,8 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             inputTransformFn.getRotation(inputTransformRotation, OpenMaya.MSpace.kWorld)
 
         for i in xrange(min(count, rotationArrayHandle.elementCount())):
-
-            dist = curveStart + math.fmod(lengthIncrement * i + distOffset, effectiveCurveLength)
+            
+            dist = math.fmod(curveStart + math.fmod(lengthIncrement * i + distOffset, effectiveCurveLength), curveLength)
             param = max( min( curveFn.findParamFromLength( dist ), maxParam ), 0.0)
 
             # Ramps are not modified by curve start/end, so objects can "slide"
@@ -920,13 +923,13 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         node.curveStartAttr = nAttr.create("curveStart", "cStart", OpenMaya.MFnNumericData.kFloat, 0.0)
         nAttr.setMin(0.0)
-        nAttr.setMax(1.0)
+        nAttr.setSoftMax(1.0)
         nAttr.setKeyable( True )
         node.addAttribute( node.curveStartAttr)
 
         node.curveEndAttr = nAttr.create("curveEnd", "cEnd", OpenMaya.MFnNumericData.kFloat, 1.0)
         nAttr.setMin(0.0)
-        nAttr.setMax(1.0)
+        nAttr.setSoftMax(1.0)
         nAttr.setKeyable( True )
         node.addAttribute( node.curveEndAttr)
 
@@ -1134,10 +1137,10 @@ class AEinstanceAlongCurveLocatorTemplate(pm.ui.AETemplate):
             annotation = "An offset for the evaluation of the curve position/rotation. This also modifies the ramp evaluation. "
             self.addControl("distOffset", label="Curve Offset", changeCommand=lambda nodeName: self.updateDimming(nodeName, "distOffset"), annotation=annotation)
 
-            annotation = "A cutoff value for the curve start point. This is normalized, so it should be in [0,1)"
+            annotation = "A cutoff value for the curve start point. This is normalized, so it should be in [0,1), but can have greater values for looping"
             self.addControl("curveStart", label="Curve Start", changeCommand=lambda nodeName: self.updateDimming(nodeName, "curveStart"), annotation=annotation)
 
-            annotation = "A cutoff value for the curve end point. This is normalized, so it should be in (0,1]"
+            annotation = "A cutoff value for the curve end point. This is normalized, so it should be in (0,1], but can have greater values for looping"
             self.addControl("curveEnd", label="Curve End", changeCommand=lambda nodeName: self.updateDimming(nodeName, "curveEnd"), annotation=annotation)
 
             self.addSeparator()
