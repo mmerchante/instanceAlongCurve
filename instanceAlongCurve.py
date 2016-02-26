@@ -380,6 +380,9 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
         instanceCountPlug = OpenMaya.MPlug(self.thisMObject(), instanceAlongCurveLocator.instanceCountAttr)
         return instanceCountPlug.asInt()
 
+    def getRandomizedValueUnified(self, randomValue, randomAmplitude, value):
+        return (randomValue * 2.0 - 1.0) * randomAmplitude + value
+
     def getRandomizedValue(self, random, randomAmplitude, value):
         return (random.random() * 2.0 - 1.0) * randomAmplitude + value
 
@@ -541,9 +544,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 normalizedDistance = dist / curveFn.length()
                 rampValue = self.getRampValueAtNormalizedPosition(rampValues, normalizedDistance)
 
-                point.x = localScaleOffset.x + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
-                point.y = localScaleOffset.y + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-                point.z = localScaleOffset.z + self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+                unifiedRandom = random.random()
+
+                # Scales are unified... because it makes more sense
+                point.x = localScaleOffset.x + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
+                point.y = localScaleOffset.y + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
+                point.z = localScaleOffset.z + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
 
                 scaleArrayHandle.jumpToArrayElement(i)
                 scaleHandle = scaleArrayHandle.outputValue()
@@ -1716,8 +1722,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
         fnCurvePoint = OpenMayaUI.MFnPointOnCurveManip(manipTuple[0])        
         param = fnCurvePoint.parameter()
 
-        normal = self.curveFn.normal(param)
-        tangent = self.curveFn.tangent(param)
+        tangent = self.curveFn.tangent(param, OpenMaya.MSpace.kWorld)
 
         numData = OpenMaya.MFnNumericData()
         numDataObj = numData.create(OpenMaya.MFnNumericData.k3Double)
@@ -1753,21 +1758,22 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject, "mmerchante", kPluginVersion )
     try:
-        # Register command
-        mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
-
         if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
+            
+            # Register command
+            mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
+
             mplugin.addMenuItem("Instance Along Curve", "MayaWindow|mainEditMenu", kPluginCmdName, "")
 
             # Register AE template
             pm.callbacks(addCallback=loadAETemplateCallback, hook='AETemplateCustomContent', owner=kPluginNodeName)
 
+            # Register IAC manip node
+            mplugin.registerNode( kPluginManipNodeName, kPluginNodeManipId, instanceAlongCurveLocatorManip.nodeCreator, instanceAlongCurveLocatorManip.nodeInitializer, OpenMayaMPx.MPxNode.kManipContainer )
+
         # Register IAC node
         mplugin.registerNode( kPluginNodeName, kPluginNodeId, instanceAlongCurveLocator.nodeCreator,
                               instanceAlongCurveLocator.nodeInitializer, OpenMayaMPx.MPxNode.kLocatorNode, kPluginNodeClassify )
-
-        # Register IAC manip node
-        mplugin.registerNode( kPluginManipNodeName, kPluginNodeManipId, instanceAlongCurveLocatorManip.nodeCreator, instanceAlongCurveLocatorManip.nodeInitializer, OpenMayaMPx.MPxNode.kManipContainer )
 
     except:
         sys.stderr.write('Failed to register plugin instanceAlongCurve. stack trace: \n')
@@ -1777,9 +1783,11 @@ def initializePlugin( mobject ):
 def uninitializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject )
     try:
-        mplugin.deregisterCommand( kPluginCmdName )
         mplugin.deregisterNode( kPluginNodeId )
-        mplugin.deregisterNode( kPluginNodeManipId )
+
+        if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
+            mplugin.deregisterCommand( kPluginCmdName )
+            mplugin.deregisterNode( kPluginNodeManipId )
     except:
         sys.stderr.write( 'Failed to deregister plugin instanceAlongCurve')
         raise
