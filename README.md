@@ -5,6 +5,7 @@
 Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
 
 Patch demo video: [Youtube Patch Video](https://www.youtube.com/watch?v=zKaDZq9ZB5I)
+
 Short demo: [Youtube](https://www.youtube.com/watch?v=k4i_dZjxVr0)
 
 ## Current Version: 1.1.0
