@@ -2,9 +2,27 @@
 [Instance Along Curve](http://mmerchante.github.io/instanceAlongCurve)
 ==================
 
-Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node called instanceAlongCurveLocator, which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
+Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
 
 Short demo at: [Youtube](https://www.youtube.com/watch?v=k4i_dZjxVr0)
+
+## Current Version: 1.1.0
+
+### (v1.1.0) NEW features
+* Added rotation manipulators, with options to reset both positions and angles
+* Added translate, rotate and scale offsets, both local and global
+* Instantiates objects based on their pivots
+* Added curve start and end values
+* Added a ramp repeat value
+* Added UI annotations
+
+#### (v1.1.0) Changes
+* Reworked core logic, orientation axis easier to handle/understand
+* Objects now preserve their initial rotation
+
+#### (v1.1.0) Fixes
+* Copy input transform now updating correctly
+* Distance mode now respects distance
 
 #### Difference with other approaches
 
@@ -23,6 +41,10 @@ However, Maya makes instancing objects from a plugin node **very** difficult, so
 * Randomize instances transformations.
 * Portable.
 * User friendly, highly flexible.
+* Manually manipulate rotations, to fix complicated situations
+* Set global&local offsets for translation, rotation and scale
+* Customize which part of the curve is going to be instantiated
+* Customize how many times ramps are going to be repeated over the curve
 
 ### Installation
 Save instanceAlongCurve.py under MAYA_PLUG_IN_PATH
