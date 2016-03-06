@@ -1,12 +1,12 @@
-[![](http://mmerchante.github.io/instanceAlongCurve/resources/header.png)](https://www.youtube.com/watch?v=k4i_dZjxVr0)
+[![](http://mmerchante.github.io/instanceAlongCurve/resources/header.png)](https://www.youtube.com/watch?v=LU2XE4lsMuw)
 [Instance Along Curve](http://mmerchante.github.io/instanceAlongCurve)
 ==================
 
 Maya API plugin developed in Python that tries to simplify the process of instancing various objects along a curve. The plugin essentially creates a new dependency graph node which handles all the necessary logic. It also includes a node creation command and an Attribute Editor template for a very familiar and user friendly interface.
 
-Patch demo video: [Youtube Patch Video](https://www.youtube.com/watch?v=zKaDZq9ZB5I)
+Patch 1.1.0 demo video: [Youtube Patch Video](https://www.youtube.com/watch?v=LU2XE4lsMuw)
 
-Short demo: [Youtube](https://www.youtube.com/watch?v=k4i_dZjxVr0)
+1.0 demo video: [Youtube](https://www.youtube.com/watch?v=k4i_dZjxVr0)
 
 ## Current Version: 1.1.0
 
