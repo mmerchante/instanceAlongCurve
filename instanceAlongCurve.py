@@ -501,7 +501,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 twistBitangent = basisForward * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
 
                 twist = (twistNormal + twistTangent + twistBitangent)
+
+                # Twist + global offset, without pivot
                 point += twist + globalTranslationOffset - rotatePivot
+
+                # Local offset
+                point += basisRight * localTranslationOffset.x + basisUp * localTranslationOffset.y + basisForward * localTranslationOffset.z
 
                 translateArrayHandle.jumpToArrayElement(i)
                 translateHandle = translateArrayHandle.outputValue()
