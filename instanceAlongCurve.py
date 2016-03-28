@@ -85,7 +85,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
     # Simple container class for compound vector attributes
     class RampValueContainer(object):
 
-        def __init__(self, mObject, dataBlock, rampAttr, normalize):            
+        def __init__(self, mObject, dataBlock, rampAttr, normalize, instanceCount):            
             self.ramp = OpenMaya.MRampAttribute(OpenMaya.MPlug(mObject, rampAttr.ramp))
             self.rampOffset = dataBlock.inputValue(rampAttr.rampOffset).asFloat()
             self.rampRandomAmplitude = dataBlock.inputValue(rampAttr.rampRandomAmplitude).asFloat()
@@ -95,7 +95,44 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             if normalize:
                 self.rampAxis = dataBlock.inputValue(rampAttr.rampAxis.compound).asVector().normal()
             else:
-                self.rampAxis = dataBlock.inputValue(rampAttr.rampAxis.compound).asVector()              
+                self.rampAxis = dataBlock.inputValue(rampAttr.rampAxis.compound).asVector()
+
+            self.useDynamicAmplitudeValues = False
+
+            amplitudePlug = OpenMaya.MPlug(mObject, rampAttr.rampAmplitude)
+
+            if amplitudePlug.isConnected():
+
+                # Get connected input plugs
+                connections = OpenMaya.MPlugArray()
+                amplitudePlug.connectedTo(connections, True, False)
+
+                # Find input transform
+                if connections.length() == 1:
+                    node = connections[0].node()
+                    nodeFn = OpenMaya.MFnDependencyNode(node)
+
+                    resultColors = OpenMaya.MFloatVectorArray()
+                    resultTransparencies = OpenMaya.MFloatVectorArray()
+
+                    uValues = OpenMaya.MFloatArray(instanceCount, 0.0)
+                    vValues = OpenMaya.MFloatArray(instanceCount, 0.0)
+
+                    # Sample a line, for more user flexibility
+                    for i in xrange(instanceCount):
+                        uValues.set(i / float(instanceCount), i)
+                        vValues.set(i / float(instanceCount), i)
+
+                    # For now... then we can just use the plug (TODO)
+                    if(node.hasFn(OpenMaya.MFn.kTexture2d)):                        
+                        
+                        OpenMayaRender.MRenderUtil.sampleShadingNetwork(nodeFn.name() + ".outColor", instanceCount, False, False, OpenMaya.MFloatMatrix(), None, uValues, vValues, None, None, None, None, None, resultColors, resultTransparencies)
+
+                        self.rampAmplitudeValues = []
+                        self.useDynamicAmplitudeValues = True
+
+                        for i in xrange(resultColors.length()):
+                            self.rampAmplitudeValues.append(resultColors[i].length() / math.sqrt(3))
 
     # Ramps base offset
     distOffsetAttr = OpenMaya.MObject()
@@ -446,7 +483,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             # Deterministic random
             random.seed(count)
-            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.positionRampAttr, False)
+            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.positionRampAttr, False, count)
 
             inputTransformRotation = OpenMaya.MQuaternion()
 
@@ -496,9 +533,11 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 basisUp = up.rotateBy(rot)
                 basisRight = right.rotateBy(rot)
 
-                twistNormal = basisRight * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
-                twistTangent = basisUp * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-                twistBitangent = basisForward * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+                rampAmplitude = self.getRampAmplitudeForInstance(rampValues, i)
+
+                twistNormal = basisRight * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.x
+                twistTangent = basisUp * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.y
+                twistBitangent = basisForward * self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.z
 
                 twist = (twistNormal + twistTangent + twistBitangent)
 
@@ -514,6 +553,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             translateArrayHandle.setAllClean()
             translateArrayHandle.setClean()
+
+    def getRampAmplitudeForInstance(self, rampValues, instanceIndex):
+
+        if rampValues.useDynamicAmplitudeValues:
+
+            if len(rampValues.rampAmplitudeValues) > instanceIndex:
+                return rampValues.rampAmplitudeValues[instanceIndex]
+
+        return rampValues.rampAmplitude
 
     def getRampValueAtNormalizedPosition(self, rampValues, v):
 
@@ -537,7 +585,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
             # Deterministic random
             random.seed(count)
-            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.scaleRampAttr, False)
+            rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.scaleRampAttr, False, count)
 
             # Make sure there are enough handles...
             for i in xrange(min(count, scaleArrayHandle.elementCount())):
@@ -550,11 +598,12 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
                 rampValue = self.getRampValueAtNormalizedPosition(rampValues, normalizedDistance)
 
                 unifiedRandom = random.random()
+                rampAmplitude = self.getRampAmplitudeForInstance(rampValues, i)
 
                 # Scales are unified... because it makes more sense
-                point.x = localScaleOffset.x + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x
-                point.y = localScaleOffset.y + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
-                point.z = localScaleOffset.z + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+                point.x = localScaleOffset.x + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.x
+                point.y = localScaleOffset.y + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.y
+                point.z = localScaleOffset.z + self.getRandomizedValueUnified(unifiedRandom, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.z
 
                 scaleArrayHandle.jumpToArrayElement(i)
                 scaleHandle = scaleArrayHandle.outputValue()
@@ -658,7 +707,7 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
 
         # Deterministic random
         random.seed(count)
-        rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.rotationRampAttr, True)
+        rampValues = instanceAlongCurveLocator.RampValueContainer(self.thisMObject(), dataBlock, instanceAlongCurveLocator.rotationRampAttr, True, count)
 
         # Manipulator stuff
         enableManipulators = dataBlock.inputValue(instanceAlongCurveLocator.enableManipulatorsAttr).asBool()
@@ -696,13 +745,15 @@ class instanceAlongCurveLocator(OpenMayaMPx.MPxLocatorNode):
             basisUp = up.rotateBy(rot)
             basisRight = right.rotateBy(rot)
 
-            twistNormal = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.x                
+            rampAmplitude = self.getRampAmplitudeForInstance(rampValues, i)
+
+            twistNormal = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.x                
             twistNormal = OpenMaya.MQuaternion(math.radians(twistNormal), basisRight) #X
 
-            twistTangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.y
+            twistTangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.y
             twistTangent = OpenMaya.MQuaternion(math.radians(twistTangent), basisUp) #Y
 
-            twistBitangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampValues.rampAmplitude) * rampValues.rampAxis.z
+            twistBitangent = self.getRandomizedValue(random, rampValues.rampRandomAmplitude, rampValue * rampAmplitude) * rampValues.rampAxis.z
             twistBitangent = OpenMaya.MQuaternion(math.radians(twistBitangent), basisForward) #Z
 
             # Modify resulting rotation based on mode
