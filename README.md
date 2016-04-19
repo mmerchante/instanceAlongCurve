@@ -49,7 +49,7 @@ However, Maya makes instancing objects from a plugin node **very** difficult, so
 * Customize how many times ramps are going to be repeated over the curve
 
 ### Installation
-Save instanceAlongCurve.py under MAYA_PLUG_IN_PATH
+Save instanceAlongCurve.py under MAYA_PLUG_IN_PATH (create the folder if it doesn't exist)
  * (Linux) $HOME/maya/plug-ins
  * (Mac OS X) $HOME/Library/Preferences/Autodesk/maya/plug-ins
  * (Windows) \\Users\\\<**username**\>\\Documents\\maya\\plug-ins
