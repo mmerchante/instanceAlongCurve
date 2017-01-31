@@ -1814,7 +1814,7 @@ class instanceAlongCurveLocatorManip(OpenMayaMPx.MPxManipContainer):
 def initializePlugin( mobject ):
     mplugin = OpenMayaMPx.MFnPlugin( mobject, "mmerchante", kPluginVersion )
     try:
-        if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
+        if (OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch) and (OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kLibraryApp):
             
             # Register command
             mplugin.registerCommand( kPluginCmdName, instanceAlongCurveCommand.cmdCreator )
@@ -1841,7 +1841,7 @@ def uninitializePlugin( mobject ):
     try:
         mplugin.deregisterNode( kPluginNodeId )
 
-        if OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch:
+        if (OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kBatch) and (OpenMaya.MGlobal.mayaState() != OpenMaya.MGlobal.kLibraryApp):
             mplugin.deregisterCommand( kPluginCmdName )
             mplugin.deregisterNode( kPluginNodeManipId )
     except:
